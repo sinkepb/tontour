@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const MESSAGE_DURATION_MS = 5000
 const QUIZ_RESULT_DELAY_MS = 1600
@@ -6,10 +6,23 @@ const SWIPE_THRESHOLD_PX = 40
 
 /**
  * Storie façon Instagram / WhatsApp : barre de progression segmentée, avance
- * automatique, navigation par tap (zones gauche/droite) ou par swipe, et
- * slides quiz interactifs. `items` = promotions actives de l'organisation.
+ * automatique, navigation par tap (zones gauche/droite) ou par swipe. `items`
+ * mélange des slides système ('ticket', 'documents' — construits par ClientPage
+ * à partir du ticket en cours) et les promotions actives de l'organisation
+ * ('message', 'quiz'). En mode `fullscreen`, prend toute la page (position fixe).
  */
-export default function StoryViewer({ items, orgName, orgLogo }) {
+export default function StoryViewer({
+  items,
+  orgName,
+  orgLogo,
+  orgPrimary,
+  orgSecondary,
+  ticket,
+  checkedDocs,
+  onToggleDoc,
+  fullscreen,
+  footer,
+}) {
   const [index, setIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -31,8 +44,8 @@ export default function StoryViewer({ items, orgName, orgLogo }) {
   // Réinitialise la progression à chaque changement de slide.
   useEffect(() => setProgress(0), [index])
 
-  // Avance automatique : messages après MESSAGE_DURATION_MS, quiz seulement
-  // une fois répondu (laisse le temps de lire la question et de répondre).
+  // Avance automatique : la plupart des slides après MESSAGE_DURATION_MS, quiz
+  // seulement une fois répondu (laisse le temps de lire la question et de répondre).
   useEffect(() => {
     if (!current || paused) return
     if (isQuiz && !hasAnswered) return // on attend une réponse avant de faire défiler
@@ -79,15 +92,16 @@ export default function StoryViewer({ items, orgName, orgLogo }) {
     setProgress(0)
   }
 
-  const gradient = useMemo(
-    () => `linear-gradient(150deg, var(--org-primary), color-mix(in srgb, var(--org-primary) 55%, var(--org-secondary)))`,
-    []
-  )
-
   if (!current) return null
 
+  const rootStyle = {
+    '--org-primary': orgPrimary,
+    '--org-secondary': orgSecondary,
+    background: 'linear-gradient(150deg, var(--org-primary), color-mix(in srgb, var(--org-primary) 55%, var(--org-secondary)))',
+  }
+
   return (
-    <div className="story-viewer" style={{ background: gradient }}>
+    <div className={`story-viewer ${fullscreen ? 'story-viewer--fullscreen' : ''}`} style={rootStyle}>
       <div className="story-progress">
         {items.map((item, i) => (
           <div className="story-progress-track" key={item.id}>
@@ -112,11 +126,56 @@ export default function StoryViewer({ items, orgName, orgLogo }) {
         onPointerUp={onPointerUp}
         onPointerLeave={() => dragRef.current && setPaused(false)}
       >
-        {isQuiz ? (
-          <QuizSlide promo={current} answeredIndex={answeredIndex} onAnswer={answer} />
-        ) : (
-          <MessageSlide promo={current} />
-        )}
+        {current.type === 'ticket' && <TicketSlide ticket={ticket} />}
+        {current.type === 'documents' && <DocumentsSlide ticket={ticket} checked={checkedDocs} onToggle={onToggleDoc} />}
+        {current.type === 'message' && <MessageSlide promo={current} />}
+        {current.type === 'quiz' && <QuizSlide promo={current} answeredIndex={answeredIndex} onAnswer={answer} />}
+      </div>
+
+      {footer && (
+        <div className="story-footer" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+          {footer}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TicketSlide({ ticket }) {
+  return (
+    <div className="story-slide">
+      <div className="story-slide-badge">{ticket.service_nom}</div>
+      <div className="story-ticket-code">{ticket.code}</div>
+      <div className="story-ticket-stats">
+        <div>
+          <div className="story-ticket-stat-value">{ticket.position}</div>
+          <div className="story-ticket-stat-label">personne(s) devant vous</div>
+        </div>
+        <div>
+          <div className="story-ticket-stat-value">~{ticket.attente_estimee_min} min</div>
+          <div className="story-ticket-stat-label">attente estimée</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DocumentsSlide({ ticket, checked, onToggle }) {
+  return (
+    <div className="story-slide">
+      <div className="story-slide-badge">📋 Documents à préparer</div>
+      <div className="story-documents-list">
+        {ticket.documents_requis.map((doc) => (
+          <label
+            key={doc}
+            className="story-doc-item"
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+          >
+            <input type="checkbox" checked={!!checked[doc]} onChange={() => onToggle(doc)} />
+            {doc}
+          </label>
+        ))}
       </div>
     </div>
   )

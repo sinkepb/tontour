@@ -320,6 +320,34 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
   animation: popIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Prend toute la page (parcours client en attente) : plus de cadre "téléphone",
+   la storie devient l'écran lui-même. */
+.story-viewer--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  aspect-ratio: auto;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: fadeInUp 0.3s ease both;
+}
+.story-viewer--fullscreen .story-progress { padding: max(14px, env(safe-area-inset-top)) 16px 0; }
+.story-viewer--fullscreen .story-header { padding: 14px 18px 4px; }
+.story-viewer--fullscreen .story-body { padding: 24px 32px; }
+.story-viewer--fullscreen .story-slide-text,
+.story-viewer--fullscreen .story-slide-question { font-size: 1.6rem; }
+.story-viewer--fullscreen .story-ticket-code { font-size: 4.4rem; }
+
+.story-footer {
+  flex-shrink: 0;
+  padding: 14px 24px max(16px, env(safe-area-inset-bottom));
+  text-align: center;
+}
+
 .story-progress {
   display: flex;
   gap: 4px;
@@ -382,6 +410,27 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
 }
 .story-slide-text { font-size: 1.35rem; font-weight: 800; line-height: 1.35; margin: 0; }
 .story-slide-question { font-size: 1.15rem; margin-bottom: 22px; }
+
+.story-ticket-code {
+  font-size: 3.4rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  margin-top: 4px;
+}
+.story-ticket-stats { display: flex; justify-content: center; gap: 40px; margin-top: 30px; }
+.story-ticket-stat-value { font-size: 1.5rem; font-weight: 800; }
+.story-ticket-stat-label { font-size: 0.75rem; opacity: 0.8; margin-top: 4px; }
+
+.story-documents-list {
+  text-align: left; margin: 8px auto 0; display: flex; flex-direction: column;
+  gap: 12px; width: 100%; max-width: 320px;
+}
+.story-doc-item {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(255, 255, 255, 0.14); border-radius: 14px; padding: 13px 16px;
+  font-weight: 600; font-size: 0.95rem; cursor: pointer;
+}
+.story-doc-item input { width: 20px; height: 20px; accent-color: white; flex-shrink: 0; }
 
 .story-quiz-options { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 6px; }
 .story-quiz-option {

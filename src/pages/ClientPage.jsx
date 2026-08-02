@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { PageShell, Card, Field, Button, LoadingScreen, IconBadge, EmptyState } from '../components/ui.jsx'
@@ -89,12 +89,57 @@ export default function ClientPage() {
     setMotif('')
   }
 
+  function toggleDoc(doc) {
+    setChecked((c) => ({ ...c, [doc]: !c[doc] }))
+  }
+
+  // Storie plein écran pendant l'attente : le ticket (code, position, ETA) et
+  // les documents à préparer sont eux-mêmes des slides, avant les promotions/quiz.
+  const waitingSlides = useMemo(() => {
+    if (!ticket) return []
+    const slides = [{ id: '__ticket__', type: 'ticket' }]
+    if (ticket.documents_requis?.length > 0) slides.push({ id: '__documents__', type: 'documents' })
+    return [...slides, ...promotions]
+  }, [ticket, promotions])
+
   if (!org) return <LoadingScreen />
 
   // ─── Écran de suivi (ticket déjà créé) ────────────────────────────────
   if (ticket && ticket.statut !== 'annule') {
     const enCours = ticket.statut === 'en_cours'
     const termine = ticket.statut === 'termine'
+
+    if (!enCours && !termine) {
+      return (
+        <StoryViewer
+          items={waitingSlides}
+          orgName={org.nom}
+          orgLogo={org.logo_url}
+          orgPrimary={org.couleur_principale}
+          orgSecondary={org.couleur_secondaire}
+          ticket={ticket}
+          checkedDocs={checked}
+          onToggleDoc={toggleDoc}
+          fullscreen
+          footer={
+            <>
+              <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', margin: '0 0 10px' }}>
+                Vous pouvez fermer cet onglet : une notification vous préviendra quand ce sera votre tour.
+              </p>
+              <Button
+                variant="outline"
+                block
+                onClick={annuler}
+                style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.4)', color: 'white' }}
+              >
+                Annuler mon ticket
+              </Button>
+            </>
+          }
+        />
+      )
+    }
+
     return (
       <PageShell organisation={org} title={org.nom} subtitle="Suivi de votre ticket">
         {enCours && (
@@ -110,51 +155,6 @@ export default function ClientPage() {
             <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
             <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Merci de votre visite</p>
           </Card>
-        )}
-
-        {!enCours && !termine && (
-          <>
-            <Card className="center">
-              <div className="ticket-code">{ticket.code}</div>
-              <p className="muted" style={{ margin: '4px 0 16px', fontWeight: 600 }}>{ticket.service_nom}</p>
-              <div className="row" style={{ justifyContent: 'center', gap: 32 }}>
-                <div className="center">
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{ticket.position}</div>
-                  <div className="muted" style={{ fontSize: '0.75rem' }}>personne(s) devant vous</div>
-                </div>
-                <div className="center">
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>~{ticket.attente_estimee_min} min</div>
-                  <div className="muted" style={{ fontSize: '0.75rem' }}>attente estimée</div>
-                </div>
-              </div>
-            </Card>
-
-            {ticket.documents_requis?.length > 0 && (
-              <Card>
-                <div className="row" style={{ justifyContent: 'flex-start', gap: 12, marginBottom: 4 }}>
-                  <IconBadge icon="📋" />
-                  <strong>Documents à préparer</strong>
-                </div>
-                <div className="stack" style={{ marginTop: 10 }}>
-                  {ticket.documents_requis.map((doc) => (
-                    <label key={doc} className="checklist-item">
-                      <input type="checkbox" checked={!!checked[doc]} onChange={(e) => setChecked((c) => ({ ...c, [doc]: e.target.checked }))} />
-                      {doc}
-                    </label>
-                  ))}
-                </div>
-              </Card>
-            )}
-
-            {promotions.length > 0 && <StoryViewer items={promotions} orgName={org.nom} orgLogo={org.logo_url} />}
-
-            <p className="muted center" style={{ fontSize: '0.8rem' }}>
-              Vous pouvez fermer cet onglet : une notification vous préviendra quand ce sera votre tour.
-            </p>
-            <Button variant="outline" block onClick={annuler}>
-              Annuler mon ticket
-            </Button>
-          </>
         )}
       </PageShell>
     )
