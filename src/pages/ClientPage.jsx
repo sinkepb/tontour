@@ -1,0 +1,226 @@
+import { useEffect, useState, useCallback } from 'react'
+import { useParams } from 'react-router-dom'
+import { api } from '../lib/api.js'
+import { PageShell, Card, Field, Button, LoadingScreen, IconBadge, EmptyState } from '../components/ui.jsx'
+import { serviceIcon } from '../lib/serviceIcon.js'
+import StoryViewer from '../components/StoryViewer.jsx'
+
+function storageKey(orgId) {
+  return `tontour_ticket_${orgId}`
+}
+
+export default function ClientPage() {
+  const { orgId } = useParams()
+  const [org, setOrg] = useState(null)
+  const [services, setServices] = useState([])
+  const [selectedService, setSelectedService] = useState(null)
+  const [motif, setMotif] = useState('')
+  const [telephone, setTelephone] = useState('')
+  const [consent, setConsent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [ticket, setTicket] = useState(null)
+  const [promotions, setPromotions] = useState([])
+  const [checked, setChecked] = useState({})
+
+  const refreshTicket = useCallback(async () => {
+    const saved = localStorage.getItem(storageKey(orgId))
+    if (!saved) return
+    const { id, client_token } = JSON.parse(saved)
+    try {
+      const status = await api.ticketStatus(id, client_token)
+      setTicket({ ...status, client_token })
+    } catch {
+      localStorage.removeItem(storageKey(orgId))
+      setTicket(null)
+    }
+  }, [orgId])
+
+  useEffect(() => {
+    api.getOrganisation(orgId).then(setOrg)
+    api.getServices(orgId).then(setServices)
+    api.listPromotions(orgId).then(setPromotions)
+    refreshTicket()
+  }, [orgId, refreshTicket])
+
+  useEffect(() => {
+    const unsubscribe = api.subscribeToOrg(orgId, refreshTicket)
+    return unsubscribe
+  }, [orgId, refreshTicket])
+
+  useEffect(() => {
+    if (ticket?.statut !== 'en_cours') return
+    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200])
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous au ${ticket.poste_nom}` })
+    }
+  }, [ticket?.statut, ticket?.code, ticket?.poste_nom])
+
+  async function creerTicket(e) {
+    e.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {})
+      }
+      const t = await api.creerTicket({
+        organisation_id: orgId,
+        service_id: selectedService.id,
+        motif: motif || null,
+        telephone: telephone || null,
+        canal: 'mobile',
+      })
+      localStorage.setItem(storageKey(orgId), JSON.stringify({ id: t.id, client_token: t.client_token }))
+      setTicket({ ...t, client_token: t.client_token })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function annuler() {
+    if (!ticket) return
+    await api.annulerTicket(ticket.id, ticket.client_token)
+    localStorage.removeItem(storageKey(orgId))
+    setTicket(null)
+    setSelectedService(null)
+    setMotif('')
+  }
+
+  if (!org) return <LoadingScreen />
+
+  // ─── Écran de suivi (ticket déjà créé) ────────────────────────────────
+  if (ticket && ticket.statut !== 'annule') {
+    const enCours = ticket.statut === 'en_cours'
+    const termine = ticket.statut === 'termine'
+    return (
+      <PageShell organisation={org} title={org.nom} subtitle="Suivi de votre ticket">
+        {enCours && (
+          <div className="hero-card">
+            <div className="hero-label">C’est votre tour</div>
+            <div className="hero-value">{ticket.poste_nom}</div>
+            <div style={{ opacity: 0.92, fontWeight: 600 }}>Présentez-vous avec le ticket {ticket.code}</div>
+          </div>
+        )}
+
+        {termine && (
+          <Card className="center">
+            <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
+            <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Merci de votre visite</p>
+          </Card>
+        )}
+
+        {!enCours && !termine && (
+          <>
+            <Card className="center">
+              <div className="ticket-code">{ticket.code}</div>
+              <p className="muted" style={{ margin: '4px 0 16px', fontWeight: 600 }}>{ticket.service_nom}</p>
+              <div className="row" style={{ justifyContent: 'center', gap: 32 }}>
+                <div className="center">
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{ticket.position}</div>
+                  <div className="muted" style={{ fontSize: '0.75rem' }}>personne(s) devant vous</div>
+                </div>
+                <div className="center">
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>~{ticket.attente_estimee_min} min</div>
+                  <div className="muted" style={{ fontSize: '0.75rem' }}>attente estimée</div>
+                </div>
+              </div>
+            </Card>
+
+            {ticket.documents_requis?.length > 0 && (
+              <Card>
+                <div className="row" style={{ justifyContent: 'flex-start', gap: 12, marginBottom: 4 }}>
+                  <IconBadge icon="📋" />
+                  <strong>Documents à préparer</strong>
+                </div>
+                <div className="stack" style={{ marginTop: 10 }}>
+                  {ticket.documents_requis.map((doc) => (
+                    <label key={doc} className="checklist-item">
+                      <input type="checkbox" checked={!!checked[doc]} onChange={(e) => setChecked((c) => ({ ...c, [doc]: e.target.checked }))} />
+                      {doc}
+                    </label>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {promotions.length > 0 && <StoryViewer items={promotions} orgName={org.nom} orgLogo={org.logo_url} />}
+
+            <p className="muted center" style={{ fontSize: '0.8rem' }}>
+              Vous pouvez fermer cet onglet : une notification vous préviendra quand ce sera votre tour.
+            </p>
+            <Button variant="outline" block onClick={annuler}>
+              Annuler mon ticket
+            </Button>
+          </>
+        )}
+      </PageShell>
+    )
+  }
+
+  // ─── Choix du motif (service sélectionné) ─────────────────────────────
+  if (selectedService) {
+    return (
+      <PageShell organisation={org} title={org.nom} subtitle={selectedService.nom} backTo={`/o/${orgId}`}>
+        <Card>
+          <form onSubmit={creerTicket}>
+            {selectedService.motifs_predefinis?.length > 0 && (
+              <Field label="Motif de votre visite (optionnel)">
+                <select className="input" value={motif} onChange={(e) => setMotif(e.target.value)}>
+                  <option value="">— Choisir un motif —</option>
+                  {selectedService.motifs_predefinis.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="__autre__">Autre (préciser)</option>
+                </select>
+              </Field>
+            )}
+            {(motif === '__autre__' || !selectedService.motifs_predefinis?.length) && (
+              <Field label={selectedService.motifs_predefinis?.length ? 'Précisez' : 'Motif de votre visite (optionnel)'}>
+                <textarea className="input" rows={2} value={motif === '__autre__' ? '' : motif} onChange={(e) => setMotif(e.target.value)} />
+              </Field>
+            )}
+            <Field label="Téléphone (optionnel — pour SMS de secours si la notification échoue)">
+              <input className="input" type="tel" placeholder="06 12 34 56 78" value={telephone} onChange={(e) => setTelephone(e.target.value)} />
+            </Field>
+            {telephone && (
+              <Field>
+                <label className="checklist-item" style={{ fontSize: '0.82rem' }}>
+                  <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} required />
+                  J’accepte que mon numéro soit utilisé uniquement pour ce ticket et supprimé sous 24h.
+                </label>
+              </Field>
+            )}
+            {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
+            <Button type="submit" block disabled={busy || (telephone && !consent)}>
+              {busy ? 'Création du ticket…' : 'Obtenir mon ticket'}
+            </Button>
+          </form>
+        </Card>
+      </PageShell>
+    )
+  }
+
+  // ─── Choix du service ──────────────────────────────────────────────────
+  return (
+    <PageShell organisation={org} title={org.nom} subtitle="Prendre un ticket">
+      <div className="stack">
+        {services.map((s) => (
+          <Card key={s.id} className="row card-clickable" onClick={() => setSelectedService(s)}>
+            <div className="row" style={{ justifyContent: 'flex-start', gap: 14 }}>
+              <IconBadge icon={serviceIcon(s.nom)} />
+              <div>
+                <strong>{s.nom}</strong>
+                <div className="muted" style={{ fontSize: '0.85rem' }}>~{s.temps_moyen_min} min en moyenne</div>
+              </div>
+            </div>
+            <span className="muted" style={{ fontSize: '1.3rem' }}>→</span>
+          </Card>
+        ))}
+        {services.length === 0 && <EmptyState icon="🎫">Aucun service disponible pour le moment.</EmptyState>}
+      </div>
+    </PageShell>
+  )
+}

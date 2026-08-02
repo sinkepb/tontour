@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tontour-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--host"],
+      "port": 5173
+    },
+    {
+      "name": "ordomail-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\immod\\Downloads\\ordomail-deploy-Restruct", "run", "dev", "--", "--host"],
+      "port": 5173
+    },
+    {
+      "name": "ordomail-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\immod\\Downloads\\ordomail-deploy-Restruct", "run", "preview", "--", "--host", "--port", "5174"],
+      "port": 5174
+    }
+  ]
+}
