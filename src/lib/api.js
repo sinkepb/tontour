@@ -19,7 +19,14 @@ export const api = {
 
   async getOrganisation(organisationId) {
     if (isDemo) return demo.getOrganisation(organisationId)
-    const { data, error } = await supabase.from('organisations').select('*').eq('id', organisationId).single()
+    // Colonnes limitées à celles réellement affichées (et accordées à anon en RLS,
+    // voir supabase/schema.sql) — un `select('*')` échoue pour les visiteurs anonymes
+    // car certaines colonnes (adresse, alerte_delai_min, cree_le) ne leur sont pas accordées.
+    const { data, error } = await supabase
+      .from('organisations')
+      .select('id, nom, type, couleur_principale, couleur_secondaire, logo_url')
+      .eq('id', organisationId)
+      .single()
     if (error) throw new Error(error.message)
     return data
   },
@@ -106,10 +113,7 @@ export const api = {
 
   async statsJour(organisationId) {
     if (isDemo) return demo.statsJour(organisationId)
-    // En production : vue matérialisée ou requête agrégée équivalente (hors périmètre MVP, cf. README).
-    const { data, error } = await supabase.rpc('stats_jour', { p_organisation_id: organisationId })
-    if (error) throw new Error(error.message)
-    return data
+    return unwrapRpc(supabase.rpc('stats_jour', { p_organisation_id: organisationId }))
   },
 
   async getTicket(ticketId) {

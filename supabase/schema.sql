@@ -97,16 +97,23 @@ alter table postes
   add constraint fk_poste_ticket_en_cours foreign key (ticket_en_cours_id) references tickets(id) on delete set null;
 
 create index idx_tickets_queue on tickets (organisation_id, service_id, statut, cree_le);
-create index idx_tickets_org_jour on tickets (organisation_id, service_id, (cree_le::date));
+-- (cree_le AT TIME ZONE 'UTC')::date plutôt que cree_le::date : le cast direct dépend du
+-- fuseau horaire de la session (STABLE, pas IMMUTABLE) et est refusé dans une expression d'index.
+create index idx_tickets_org_jour on tickets (organisation_id, service_id, ((cree_le at time zone 'utc')::date));
 
 -- ─── RGPD : rétention courte du téléphone ──────────────────────────────────
 -- À planifier via pg_cron (Supabase) : purge quotidienne des tickets terminés
 -- depuis plus de 24h (téléphone + motif), conservation des seules métriques.
--- select cron.schedule('purge-tickets-rgpd', '0 3 * * *', $$
---   update tickets set telephone = null, motif = null
---   where statut in ('termine', 'annule') and coalesce(termine_le, cree_le) < now() - interval '24 hours'
---     and telephone is not null;
--- $$);
+-- Note : le corps de la tâche cron.schedule() est lui-même délimité par des
+-- guillemets dollar (dollar-quoting) — à écrire directement dans le SQL
+-- Editor le jour de l'activation plutôt qu'ici en commentaire, pour éviter
+-- toute confusion avec le dollar-quoting des fonctions plus bas dans ce fichier :
+--
+--   cron.schedule('purge-tickets-rgpd', '0 3 * * *',
+--     'update tickets set telephone = null, motif = null
+--      where statut in (''termine'', ''annule'')
+--        and coalesce(termine_le, cree_le) < now() - interval ''24 hours''
+--        and telephone is not null;');
 
 -- ─── Fonctions utilitaires ──────────────────────────────────────────────
 
@@ -154,12 +161,14 @@ create or replace function creer_ticket(
   p_telephone text default null,
   p_canal text default 'mobile'
 )
-returns table (id uuid, code text, client_token uuid, position int, attente_estimee_min int)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
 begin
-  if not exists (select 1 from services where id = p_service_id and organisation_id = p_organisation_id and actif) then
+  -- Alias "s" obligatoire : cette fonction déclare RETURNS TABLE(id ...), donc "id" seul
+  -- serait ambigu entre la colonne services.id et la variable de sortie "id" de la fonction.
+  if not exists (select 1 from services s where s.id = p_service_id and s.organisation_id = p_organisation_id and s.actif) then
     raise exception 'Service invalide ou inactif';
   end if;
 
@@ -172,19 +181,23 @@ end;
 $$;
 
 -- ─── RPC : suivi de position (route citoyenne, anonyme, protégée par token) ─
+-- Note : "position" est un mot réservé PostgreSQL (syntaxe POSITION(x IN y)) —
+-- doit être entre guillemets doubles dans la déclaration RETURNS TABLE.
 create or replace function ticket_status(p_ticket_id uuid, p_client_token uuid)
-returns table (id uuid, code text, client_token uuid, statut text, position int, attente_estimee_min int, poste_nom text)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
   v_temps_moyen int;
 begin
-  select * into v_ticket from tickets where id = p_ticket_id and client_token = p_client_token;
+  -- Alias "t"/"s" obligatoires : cette fonction déclare RETURNS TABLE(id, client_token, ...),
+  -- donc ces noms seuls seraient ambigus avec les variables de sortie du même nom.
+  select * into v_ticket from tickets t where t.id = p_ticket_id and t.client_token = p_client_token;
   if not found then
     raise exception 'Ticket introuvable';
   end if;
 
-  select temps_moyen_min into v_temps_moyen from services where id = v_ticket.service_id;
+  select temps_moyen_min into v_temps_moyen from services s where s.id = v_ticket.service_id;
 
   return query
   select
@@ -194,11 +207,13 @@ begin
     v_ticket.statut,
     (select count(*)::int from tickets t
        where t.service_id = v_ticket.service_id and t.statut = 'en_attente' and t.cree_le < v_ticket.cree_le)
-      as position,
+      as "position",
     ((select count(*)::int from tickets t
        where t.service_id = v_ticket.service_id and t.statut = 'en_attente' and t.cree_le < v_ticket.cree_le)
       * coalesce(v_temps_moyen, 5)) as attente_estimee_min,
-    (select nom from postes where id = v_ticket.poste_id) as poste_nom;
+    (select p.nom from postes p where p.id = v_ticket.poste_id) as poste_nom,
+    (select s.nom from services s where s.id = v_ticket.service_id) as service_nom,
+    (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis;
 end;
 $$;
 
@@ -268,7 +283,9 @@ language plpgsql stable security definer set search_path = public as $$
 declare
   v_poste postes;
 begin
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id();
+  -- Alias "p" obligatoire : cette fonction déclare RETURNS TABLE(id ...), donc "id" seul
+  -- serait ambigu entre la colonne postes.id et la variable de sortie "id" de la fonction.
+  select * into v_poste from postes p where p.id = p_poste_id and p.organisation_id = agent_organisation_id();
   if not found or v_poste.ticket_en_cours_id is not null then
     return;
   end if;
@@ -448,6 +465,11 @@ create policy "logos_admin_delete" on storage.objects for delete
 insert into organisations (id, nom, type, couleur_principale, couleur_secondaire, adresse) values
   ('00000000-0000-0000-0000-000000000001', 'Mobile Store Bastille', 'boutique', '#ea580c', '#fb923c', '12 rue de la Roquette, 75011 Paris'),
   ('00000000-0000-0000-0000-000000000002', 'Mairie de Villeneuve', 'mairie', '#0f766e', '#5eead4', '1 place de la Mairie, 33140 Villeneuve');
+
+insert into postes (organisation_id, nom) values
+  ('00000000-0000-0000-0000-000000000001', 'Poste 1'),
+  ('00000000-0000-0000-0000-000000000001', 'Poste 2'),
+  ('00000000-0000-0000-0000-000000000002', 'Guichet 1');
 
 insert into services (organisation_id, prefixe_ticket, nom, temps_moyen_min, poids, documents_requis, motifs_predefinis) values
   ('00000000-0000-0000-0000-000000000001', 'V', 'Ventes', 6, 1, '["Pièce d''identité"]', '["Nouveau forfait", "Changement de forfait", "Nouvel appareil"]'),
