@@ -4,6 +4,10 @@
 
 SaaS multi-tenant de gestion de file d'attente pour boutiques télécom et services publics (mairies, CCAS). Ce dépôt contient le **MVP production** : 4 interfaces (citoyen, agent, back-office, écran de salle), backend Postgres/Supabase avec RLS, et un **mode démo** qui fait tourner l'application entièrement en local sans aucun backend.
 
+**En ligne** : [bk-kappa-gold.vercel.app](https://bk-kappa-gold.vercel.app) (branche `main`, connecté au projet Supabase `tontour`).
+
+> Écart courant vs. DEPLOIEMENT.md : un seul projet Supabase (`tontour`) est utilisé pour Preview et Production pour le moment, au lieu de `tontour-dev` / `tontour-prod` séparés — à scinder avant d'avoir de vraies données de production. Le projet Vercel s'appelle `bk` (nom du dossier local, sous l'équipe `ordomail`) plutôt que `tontour` — renommable depuis le dashboard Vercel si besoin, sans impact fonctionnel.
+
 ---
 
 ## Démarrage local (2 minutes, sans rien configurer)
@@ -35,6 +39,8 @@ Le mode démo permet de tester les 4 interfaces en parallèle, dans des onglets 
 | Mobile Store Bastille (boutique) | Admin (back-office) | `admin@boutique.demo` | `admin123` |
 | Mairie de Villeneuve | Agent | `agent@mairie.demo` | `demo123` |
 | Mairie de Villeneuve | Admin (back-office) | `admin@mairie.demo` | `admin123` |
+
+Ces 4 comptes existent en mode démo **et** sur le projet Supabase réel `tontour` (créés via l'API Admin lors de la mise en service) — utilisables aussi bien en local qu'en production tant que ce projet Supabase unique est en place.
 
 ### Tests automatisés
 
