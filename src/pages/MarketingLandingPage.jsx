@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Button } from '../components/ui.jsx'
 import ProblemIllustration from '../components/ProblemIllustration.jsx'
 
@@ -141,7 +140,7 @@ export default function MarketingLandingPage() {
           <a href="#tarifs">Tarifs</a>
         </nav>
         <div style={{ marginLeft: 'auto' }}>
-          <Button as={Link} to="/demo" sm>Voir la démo</Button>
+          <Button as="a" href={`mailto:${CONTACT_EMAIL}`} sm>Nous contacter</Button>
         </div>
       </header>
 
@@ -154,8 +153,7 @@ export default function MarketingLandingPage() {
         </h1>
         <p className="lead">{seg.lead}</p>
         <div className="hero-ctas">
-          <Button as={Link} to="/demo">🎫 Voir la démo interactive</Button>
-          <Button as="a" href={`mailto:${CONTACT_EMAIL}`} variant="outline">Demander une démonstration</Button>
+          <Button as="a" href={`mailto:${CONTACT_EMAIL}`}>📩 Demander un rendez-vous</Button>
         </div>
 
         <div style={{ marginTop: 40 }}>
@@ -254,7 +252,7 @@ export default function MarketingLandingPage() {
 
       <footer className="site-footer">
         <p>
-          TonTour — File d’attente dématérialisée · <Link to="/demo">Voir la démo</Link> · <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          TonTour — File d’attente dématérialisée · <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
         </p>
         <p style={{ marginTop: 6, opacity: 0.7 }}>Projet en développement — tarifs et offres indicatifs.</p>
       </footer>

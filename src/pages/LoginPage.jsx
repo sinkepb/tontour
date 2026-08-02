@@ -50,7 +50,7 @@ export default function LoginPage() {
   const comptes = DEMO_ACCOUNTS[org?.type] || DEMO_ACCOUNTS.boutique
 
   return (
-    <PageShell organisation={org} title="Connexion" subtitle={org?.nom} backTo="/demo">
+    <PageShell organisation={org} title="Connexion" subtitle={org?.nom} backTo={isDemo ? '/demo' : '/'}>
       <Card>
         <div className="row" style={{ justifyContent: 'flex-start', gap: 12, marginBottom: 18 }}>
           <IconBadge icon="🔐" />

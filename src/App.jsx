@@ -31,7 +31,7 @@ export default function App() {
         )}
         <Routes>
           <Route path="/" element={<MarketingLandingPage />} />
-          <Route path="/demo" element={<LandingPage />} />
+          {isDemo && <Route path="/demo" element={<LandingPage />} />}
           <Route path="/o/:orgId" element={<ClientPage />} />
           <Route path="/o/:orgId/connexion" element={<LoginPage />} />
           <Route
