@@ -179,7 +179,16 @@ export function ticketStatus(ticketId, clientToken) {
     poste_nom: poste?.nom ?? null,
     service_nom: service?.nom ?? null,
     documents_requis: service?.documents_requis ?? [],
+    note: ticket.note ?? null,
   }
+}
+
+export function noterTicket(ticketId, clientToken, note) {
+  const ticket = state.tickets.find((t) => t.id === ticketId && t.client_token === clientToken)
+  if (!ticket || ticket.statut !== 'termine') throw new Error('Ticket introuvable ou pas encore terminé')
+  if (note < 1 || note > 5) throw new Error('Note invalide (1 à 5)')
+  ticket.note = note
+  persist()
 }
 
 export function salleAffichage(organisationId) {
@@ -255,6 +264,7 @@ export function creerTicket({ organisation_id, service_id, motif, telephone, can
     cree_le,
     appele_le: null,
     termine_le: null,
+    note: null,
   }
   state.tickets.push(ticket)
   persist()

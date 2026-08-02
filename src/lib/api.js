@@ -83,6 +83,12 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
+  async noterTicket(ticketId, clientToken, note) {
+    if (isDemo) return demo.noterTicket(ticketId, clientToken, note)
+    const { error } = await supabase.rpc('noter_ticket', { p_ticket_id: ticketId, p_client_token: clientToken, p_note: note })
+    if (error) throw new Error(error.message)
+  },
+
   async apercuProchain(posteId) {
     if (isDemo) return demo.apercuProchain(posteId)
     return unwrapRpc(supabase.rpc('apercu_prochain', { p_poste_id: posteId })).catch(() => null)

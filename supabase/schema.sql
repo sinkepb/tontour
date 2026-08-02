@@ -90,7 +90,8 @@ create table tickets (
   poste_id         uuid references postes(id) on delete set null,
   cree_le          timestamptz not null default now(),
   appele_le        timestamptz,
-  termine_le       timestamptz
+  termine_le       timestamptz,
+  note             int check (note between 1 and 5) -- notation client, laissée juste après le traitement
 );
 
 alter table postes
@@ -161,7 +162,7 @@ create or replace function creer_ticket(
   p_telephone text default null,
   p_canal text default 'mobile'
 )
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -184,7 +185,7 @@ $$;
 -- Note : "position" est un mot réservé PostgreSQL (syntaxe POSITION(x IN y)) —
 -- doit être entre guillemets doubles dans la déclaration RETURNS TABLE.
 create or replace function ticket_status(p_ticket_id uuid, p_client_token uuid)
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -213,7 +214,27 @@ begin
       * coalesce(v_temps_moyen, 5)) as attente_estimee_min,
     (select p.nom from postes p where p.id = v_ticket.poste_id) as poste_nom,
     (select s.nom from services s where s.id = v_ticket.service_id) as service_nom,
-    (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis;
+    (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis,
+    v_ticket.note;
+end;
+$$;
+
+-- ─── RPC : notation de la prestation (route citoyenne, anonyme, protégée par token) ─
+-- Autorisée uniquement une fois le ticket terminé, pour éviter qu'un client note
+-- avant d'avoir été servi.
+create or replace function noter_ticket(p_ticket_id uuid, p_client_token uuid, p_note int)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_note < 1 or p_note > 5 then
+    raise exception 'Note invalide (1 à 5)';
+  end if;
+
+  update tickets t set note = p_note
+  where t.id = p_ticket_id and t.client_token = p_client_token and t.statut = 'termine';
+  if not found then
+    raise exception 'Ticket introuvable ou pas encore terminé';
+  end if;
 end;
 $$;
 
@@ -433,6 +454,16 @@ create policy postes_admin_delete on postes for delete using (organisation_id = 
 -- (utile pour les stats et le back-office).
 create policy tickets_org_read on tickets for select using (organisation_id = agent_organisation_id());
 revoke all on tickets from anon;
+
+-- ============================================================================
+-- Realtime : sans ceci, les abonnements postgres_changes (src/lib/api.js
+-- subscribeToOrg) ne se déclenchent JAMAIS, silencieusement — ni la
+-- notification client ("c'est votre tour"), ni le rafraîchissement du poste
+-- agent quand un ticket arrive. Une table créée par le SQL Editor n'est pas
+-- ajoutée automatiquement à la publication realtime de Supabase.
+-- ============================================================================
+
+alter publication supabase_realtime add table tickets, postes;
 
 -- ============================================================================
 -- Storage : upload du logo par organisation (back-office § Identité visuelle)

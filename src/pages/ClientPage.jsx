@@ -49,10 +49,14 @@ export default function ClientPage() {
   }, [orgId, refreshTicket])
 
   useEffect(() => {
-    if (ticket?.statut !== 'en_cours') return
+    if (ticket?.statut !== 'en_cours' && ticket?.statut !== 'termine') return
     if ('vibrate' in navigator) navigator.vibrate([200, 100, 200])
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous au ${ticket.poste_nom}` })
+      if (ticket.statut === 'en_cours') {
+        new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous au ${ticket.poste_nom}` })
+      } else {
+        new Notification('TonTour — traitement terminé', { body: `Ticket ${ticket.code} — merci ! Donnez votre avis en 1 clic.` })
+      }
     }
   }, [ticket?.statut, ticket?.code, ticket?.poste_nom])
 
@@ -153,7 +157,8 @@ export default function ClientPage() {
         {termine && (
           <Card className="center">
             <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
-            <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Merci de votre visite</p>
+            <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: '0 0 4px' }}>Merci de votre visite</p>
+            <RatingWidget ticket={ticket} />
           </Card>
         )}
       </PageShell>
@@ -222,5 +227,56 @@ export default function ClientPage() {
         {services.length === 0 && <EmptyState icon="🎫">Aucun service disponible pour le moment.</EmptyState>}
       </div>
     </PageShell>
+  )
+}
+
+/** Notation 1-5 étoiles, envoyée immédiatement au clic (protégée côté serveur par le client_token). */
+function RatingWidget({ ticket }) {
+  const [note, setNote] = useState(ticket.note ?? null)
+  const [hover, setHover] = useState(0)
+  const [sending, setSending] = useState(false)
+
+  async function noter(n) {
+    if (sending || note) return
+    setSending(true)
+    try {
+      await api.noterTicket(ticket.id, ticket.client_token, n)
+      setNote(n)
+    } catch {
+      // silencieux : la notation n'est pas critique, on laisse le client réessayer
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (note) {
+    return (
+      <div style={{ marginTop: 12 }}>
+        <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 6px' }}>Merci pour votre retour !</p>
+        <div style={{ fontSize: '1.6rem' }}>{'⭐'.repeat(note)}{'☆'.repeat(5 - note)}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 8px' }}>Comment s’est passée votre visite ?</p>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => noter(n)}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            disabled={sending}
+            style={{ background: 'none', border: 'none', cursor: sending ? 'default' : 'pointer', fontSize: '2rem', padding: 2, lineHeight: 1 }}
+            aria-label={`${n} étoile${n > 1 ? 's' : ''}`}
+          >
+            {n <= hover ? '⭐' : '☆'}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
