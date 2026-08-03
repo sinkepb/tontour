@@ -127,7 +127,10 @@ export default function ClientPage() {
     const enCours = ticket.statut === 'en_cours'
     const termine = ticket.statut === 'termine'
 
-    if (!enCours && !termine) {
+    // L'alerte de la sonnette (en_cours) se pose au-dessus de la storie sans la
+    // faire disparaître : le client garde ses infos de ticket/documents sous les
+    // yeux, avec le message "c'est votre tour" en overlay par-dessus.
+    if (!termine) {
       return (
         <StoryViewer
           items={waitingSlides}
@@ -139,20 +142,23 @@ export default function ClientPage() {
           checkedDocs={checked}
           onToggleDoc={toggleDoc}
           fullscreen
+          alert={enCours ? { title: 'C’est votre tour !', body: `Présentez-vous au ${ticket.poste_nom} avec le ticket ${ticket.code}` } : null}
           footer={
-            <>
-              <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', margin: '0 0 10px' }}>
-                Gardez cette page ouverte (elle peut rester en arrière-plan) : c’est elle qui vous préviendra quand ce sera votre tour.
-              </p>
-              <Button
-                variant="outline"
-                block
-                onClick={annuler}
-                style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.4)', color: 'white' }}
-              >
-                Annuler mon ticket
-              </Button>
-            </>
+            enCours ? null : (
+              <>
+                <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', margin: '0 0 10px' }}>
+                  Gardez cette page ouverte (elle peut rester en arrière-plan) : c’est elle qui vous préviendra quand ce sera votre tour.
+                </p>
+                <Button
+                  variant="outline"
+                  block
+                  onClick={annuler}
+                  style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.4)', color: 'white' }}
+                >
+                  Annuler mon ticket
+                </Button>
+              </>
+            )
           }
         />
       )
@@ -160,21 +166,11 @@ export default function ClientPage() {
 
     return (
       <PageShell organisation={org} title={org.nom} subtitle="Suivi de votre ticket">
-        {enCours && (
-          <div className="hero-card">
-            <div className="hero-label">C’est votre tour</div>
-            <div className="hero-value">{ticket.poste_nom}</div>
-            <div style={{ opacity: 0.92, fontWeight: 600 }}>Présentez-vous avec le ticket {ticket.code}</div>
-          </div>
-        )}
-
-        {termine && (
-          <Card className="center">
-            <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
-            <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: '0 0 4px' }}>Merci de votre visite</p>
-            <RatingWidget ticket={ticket} />
-          </Card>
-        )}
+        <Card className="center">
+          <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
+          <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: '0 0 4px' }}>Merci de votre visite</p>
+          <RatingWidget ticket={ticket} />
+        </Card>
       </PageShell>
     )
   }

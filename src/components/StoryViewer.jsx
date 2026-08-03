@@ -22,6 +22,7 @@ export default function StoryViewer({
   onToggleDoc,
   fullscreen,
   footer,
+  alert,
 }) {
   const [index, setIndex] = useState(0)
   const [progress, setProgress] = useState(0)
@@ -34,6 +35,10 @@ export default function StoryViewer({
   const isQuiz = current?.type === 'quiz'
   const answeredIndex = current ? answers[current.id] : undefined
   const hasAnswered = answeredIndex !== undefined
+  // Un message d'alerte (sonnette) se pose par-dessus la storie sans la faire
+  // disparaître : on met juste le défilement automatique en pause pendant que
+  // l'agent appelle, le temps que le client lise l'alerte.
+  const effectivelyPaused = paused || !!alert
 
   const goTo = (next) => {
     if (items.length === 0) return
@@ -47,7 +52,7 @@ export default function StoryViewer({
   // Avance automatique : la plupart des slides après MESSAGE_DURATION_MS, quiz
   // seulement une fois répondu (laisse le temps de lire la question et de répondre).
   useEffect(() => {
-    if (!current || paused) return
+    if (!current || effectivelyPaused) return
     if (isQuiz && !hasAnswered) return // on attend une réponse avant de faire défiler
 
     const duration = isQuiz ? QUIZ_RESULT_DELAY_MS : MESSAGE_DURATION_MS
@@ -63,7 +68,7 @@ export default function StoryViewer({
     const id = setInterval(tick, 50)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, paused, isQuiz, hasAnswered, items.length])
+  }, [index, effectivelyPaused, isQuiz, hasAnswered, items.length])
 
   function onPointerDown(e) {
     dragRef.current = { x: e.clientX, t: Date.now() }
@@ -118,6 +123,16 @@ export default function StoryViewer({
         <span className="story-org-name">{orgName}</span>
         <span className="story-time">à l’instant</span>
       </div>
+
+      {alert && (
+        <div className="story-alert" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+          <span className="story-alert-icon">🔔</span>
+          <div>
+            <div className="story-alert-title">{alert.title}</div>
+            {alert.body && <div className="story-alert-body">{alert.body}</div>}
+          </div>
+        </div>
+      )}
 
       <div
         className="story-body"
