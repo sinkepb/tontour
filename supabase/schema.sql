@@ -155,6 +155,9 @@ create trigger trg_generer_code_ticket
   for each row execute function generer_code_ticket();
 
 -- ─── RPC : création de ticket (route citoyenne, anonyme) ──────────────────
+drop function if exists creer_ticket(uuid, uuid, text, text, text);
+drop function if exists ticket_status(uuid, uuid);
+
 create or replace function creer_ticket(
   p_organisation_id uuid,
   p_service_id uuid,
@@ -162,7 +165,7 @@ create or replace function creer_ticket(
   p_telephone text default null,
   p_canal text default 'mobile'
 )
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -185,7 +188,7 @@ $$;
 -- Note : "position" est un mot réservé PostgreSQL (syntaxe POSITION(x IN y)) —
 -- doit être entre guillemets doubles dans la déclaration RETURNS TABLE.
 create or replace function ticket_status(p_ticket_id uuid, p_client_token uuid)
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -215,7 +218,8 @@ begin
     (select p.nom from postes p where p.id = v_ticket.poste_id) as poste_nom,
     (select s.nom from services s where s.id = v_ticket.service_id) as service_nom,
     (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis,
-    v_ticket.note;
+    v_ticket.note,
+    v_ticket.appele_le;
 end;
 $$;
 
@@ -337,6 +341,24 @@ begin
 
   update tickets set statut = 'termine', termine_le = now() where id = v_poste.ticket_en_cours_id;
   update postes set ticket_en_cours_id = null where id = p_poste_id;
+end;
+$$;
+
+-- ─── RPC : relancer la notification du client en cours (poste vendeur) ────
+-- Ne réassigne rien : touche seulement appele_le, pour permettre à l'agent de
+-- rappeler un client qui n'a pas répondu, sans perdre le ticket en cours.
+create or replace function rappeler_client(p_poste_id uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_poste postes;
+begin
+  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id();
+  if not found or v_poste.ticket_en_cours_id is null then
+    raise exception 'Aucun ticket en cours sur ce poste';
+  end if;
+
+  update tickets set appele_le = now() where id = v_poste.ticket_en_cours_id;
 end;
 $$;
 

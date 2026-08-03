@@ -69,7 +69,10 @@ export default function ClientPage() {
         new Notification('TonTour — traitement terminé', { body: `Ticket ${ticket.code} — merci ! Donnez votre avis en 1 clic.` })
       }
     }
-  }, [ticket?.statut, ticket?.code, ticket?.poste_nom])
+    // ticket.appele_le dans les dépendances : l'agent peut rappeler (sonnette
+    // toujours active après le premier appel) sans changer le statut du ticket,
+    // ce re-déclenchement garantit une nouvelle notification à chaque rappel.
+  }, [ticket?.statut, ticket?.code, ticket?.poste_nom, ticket?.appele_le])
 
   async function creerTicket(e) {
     e.preventDefault()

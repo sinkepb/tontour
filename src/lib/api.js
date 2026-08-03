@@ -105,6 +105,12 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
+  async rappelerClient(posteId) {
+    if (isDemo) return demo.rappelerClient(posteId)
+    const { error } = await supabase.rpc('rappeler_client', { p_poste_id: posteId })
+    if (error) throw new Error(error.message)
+  },
+
   async salleAffichage(organisationId) {
     if (isDemo) return demo.salleAffichage(organisationId)
     return unwrapRpc(supabase.rpc('salle_affichage', { p_organisation_id: organisationId }))

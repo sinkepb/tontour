@@ -180,6 +180,7 @@ export function ticketStatus(ticketId, clientToken) {
     service_nom: service?.nom ?? null,
     documents_requis: service?.documents_requis ?? [],
     note: ticket.note ?? null,
+    appele_le: ticket.appele_le ?? null,
   }
 }
 
@@ -316,6 +317,16 @@ export function terminerTraitement(posteId) {
   ticket.statut = 'termine'
   ticket.termine_le = new Date().toISOString()
   poste.ticket_en_cours_id = null
+  persist()
+}
+
+/** Relance la notification sans réassigner le ticket : la sonnette reste active
+ * après le premier appel pour rappeler un client qui n'a pas répondu. */
+export function rappelerClient(posteId) {
+  const poste = state.postes.find((p) => p.id === posteId)
+  if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
+  const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+  ticket.appele_le = new Date().toISOString()
   persist()
 }
 

@@ -82,7 +82,13 @@ export default function AgentPage() {
     setBusy(true)
     setError('')
     try {
-      await api.appelerProchain(posteId)
+      // Une fois le ticket en cours, la sonnette reste active : on relance juste la
+      // notification (sans réassigner) pour rappeler un client qui n'a pas répondu.
+      if (ticketEnCours) {
+        await api.rappelerClient(posteId)
+      } else {
+        await api.appelerProchain(posteId)
+      }
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -241,13 +247,18 @@ export default function AgentPage() {
               <div className="hero-value">{t.code}</div>
               <div style={{ fontWeight: 600, opacity: 0.92 }}>{serviceName(t.service_id)}</div>
               {t.motif && <div style={{ opacity: 0.85, marginTop: 8, fontSize: '0.9rem' }}>Motif : {t.motif}</div>}
+              {ticketEnCours?.appele_le && (
+                <div style={{ opacity: 0.75, marginTop: 8, fontSize: '0.78rem' }}>
+                  Dernier appel : {new Date(ticketEnCours.appele_le).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
                 <Button
-                  disabled={busy || !!ticketEnCours}
+                  disabled={busy}
                   onClick={appeler}
                   style={{ flex: 1, background: ticketEnCours ? 'rgba(255,255,255,0.15)' : undefined, color: ticketEnCours ? 'white' : undefined, border: ticketEnCours ? '1.5px solid rgba(255,255,255,0.4)' : undefined }}
                 >
-                  🔔 Appeler ce client
+                  {ticketEnCours ? '🔔 Rappeler le client' : '🔔 Appeler ce client'}
                 </Button>
                 <Button
                   variant="outline"
