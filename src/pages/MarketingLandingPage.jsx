@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Button } from '../components/ui.jsx'
 import ProblemIllustration from '../components/ProblemIllustration.jsx'
 
@@ -116,7 +117,7 @@ const SEGMENTS = {
 
 const WORKFLOW = [
   ['Le client scanne', 'Il choisit son service, précise un motif si besoin, et reçoit un code de passage.'],
-  ['Il patiente où il veut', 'Position et temps d’attente estimé en direct — il peut fermer l’onglet et vaquer à autre chose.'],
+  ['Il patiente où il veut', 'Position et temps d’attente estimé en direct — il garde juste la page ouverte (même en arrière-plan) et vaque à ses occupations.'],
   ['Le vendeur appelle', 'Notification instantanée (vibration + web push), en moins de 2 secondes.'],
 ]
 
@@ -139,7 +140,8 @@ export default function MarketingLandingPage() {
           <a href="#workflow">Comment ça marche</a>
           <a href="#tarifs">Tarifs</a>
         </nav>
-        <div style={{ marginLeft: 'auto' }}>
+        <div className="row" style={{ marginLeft: 'auto', gap: 10 }}>
+          <Button as={Link} to="/connexion" variant="outline" sm>🔐 Espace agent / admin</Button>
           <Button as="a" href={`mailto:${CONTACT_EMAIL}`} sm>Nous contacter</Button>
         </div>
       </header>

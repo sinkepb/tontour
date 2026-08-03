@@ -45,7 +45,18 @@ export default function ClientPage() {
 
   useEffect(() => {
     const unsubscribe = api.subscribeToOrg(orgId, refreshTicket)
-    return unsubscribe
+    // Filet de sécurité : la table tickets n'accorde aucun accès direct à anon (RLS,
+    // voir supabase/schema.sql), donc le realtime postgres_changes peut ne jamais
+    // parvenir à un client anonyme selon la configuration du projet Supabase. Ce
+    // polling léger (protégé par client_token via la RPC ticket_status) garantit que
+    // la notification "c'est votre tour" arrive même si le canal realtime est muet.
+    const interval = setInterval(() => {
+      if (localStorage.getItem(storageKey(orgId))) refreshTicket()
+    }, 4000)
+    return () => {
+      unsubscribe()
+      clearInterval(interval)
+    }
   }, [orgId, refreshTicket])
 
   useEffect(() => {
@@ -128,7 +139,7 @@ export default function ClientPage() {
           footer={
             <>
               <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', margin: '0 0 10px' }}>
-                Vous pouvez fermer cet onglet : une notification vous préviendra quand ce sera votre tour.
+                Gardez cette page ouverte (elle peut rester en arrière-plan) : c’est elle qui vous préviendra quand ce sera votre tour.
               </p>
               <Button
                 variant="outline"

@@ -225,30 +225,42 @@ export default function AgentPage() {
 
       {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
 
-      {ticketEnCours ? (
-        <div className="hero-card">
-          <div className="hero-label">Client en cours</div>
-          <div className="hero-value">{ticketEnCours.code}</div>
-          <div style={{ fontWeight: 600, opacity: 0.92 }}>{serviceName(ticketEnCours.service_id)}</div>
-          {ticketEnCours.motif && <div style={{ opacity: 0.85, marginTop: 8, fontSize: '0.9rem' }}>Motif : {ticketEnCours.motif}</div>}
-          <Button block variant="outline" disabled={busy} onClick={terminer} style={{ marginTop: 20, background: 'white', position: 'relative' }}>
-            Terminer ce traitement
-          </Button>
-        </div>
-      ) : poste.en_pause ? (
+      {poste.en_pause ? (
         <Card>
           <EmptyState icon="⏸️">En pause — reprenez pour recevoir de nouveaux clients.</EmptyState>
         </Card>
-      ) : prochain ? (
-        <Card>
-          <div className="muted" style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Prochain client</div>
-          <div className="ticket-code" style={{ textAlign: 'left', margin: '6px 0' }}>{prochain.code}</div>
-          <div style={{ fontWeight: 600 }}>{serviceName(prochain.service_id)}</div>
-          {prochain.motif && <div className="muted" style={{ marginTop: 4 }}>Motif : {prochain.motif}</div>}
-          <Button block disabled={busy} onClick={appeler} style={{ marginTop: 18 }}>
-            🔔 Appeler ce client
-          </Button>
-        </Card>
+      ) : ticketEnCours || prochain ? (
+        // Carte unique, toujours affichée pour le ticket courant (prochain ou en cours) :
+        // les deux actions (sonnette / terminer) restent visibles ensemble, on ne bascule
+        // jamais vers un autre écran qui ferait disparaître les infos du ticket.
+        (() => {
+          const t = ticketEnCours || prochain
+          return (
+            <div className="hero-card">
+              <div className="hero-label">{ticketEnCours ? 'Client en cours' : 'Prochain client'}</div>
+              <div className="hero-value">{t.code}</div>
+              <div style={{ fontWeight: 600, opacity: 0.92 }}>{serviceName(t.service_id)}</div>
+              {t.motif && <div style={{ opacity: 0.85, marginTop: 8, fontSize: '0.9rem' }}>Motif : {t.motif}</div>}
+              <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                <Button
+                  disabled={busy || !!ticketEnCours}
+                  onClick={appeler}
+                  style={{ flex: 1, background: ticketEnCours ? 'rgba(255,255,255,0.15)' : undefined, color: ticketEnCours ? 'white' : undefined, border: ticketEnCours ? '1.5px solid rgba(255,255,255,0.4)' : undefined }}
+                >
+                  🔔 Appeler ce client
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={busy || !ticketEnCours}
+                  onClick={terminer}
+                  style={{ flex: 1, background: 'white' }}
+                >
+                  ✅ Terminer ce traitement
+                </Button>
+              </div>
+            </div>
+          )
+        })()
       ) : (
         <Card>
           <EmptyState icon="✅">Aucun client en attente pour vos services actuels.</EmptyState>
