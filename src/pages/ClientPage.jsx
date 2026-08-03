@@ -109,6 +109,20 @@ export default function ClientPage() {
     setPrioritaire(false)
   }
 
+  // Un ticket terminé n'a plus besoin d'être suivi : on nettoie tout de suite le
+  // localStorage pour qu'un nouveau scan du QR code (même URL) reparte sur le choix
+  // du service au lieu de rester bloqué sur l'écran de notation de l'ancien ticket.
+  useEffect(() => {
+    if (ticket?.statut === 'termine') localStorage.removeItem(storageKey(orgId))
+  }, [ticket?.statut, orgId])
+
+  function nouveauTicket() {
+    setTicket(null)
+    setSelectedService(null)
+    setMotif('')
+    setPrioritaire(false)
+  }
+
   function toggleDoc(doc) {
     setChecked((c) => ({ ...c, [doc]: !c[doc] }))
   }
@@ -172,6 +186,9 @@ export default function ClientPage() {
           <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>👋</div>
           <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: '0 0 4px' }}>Merci de votre visite</p>
           <RatingWidget ticket={ticket} />
+          <Button block variant="outline" onClick={nouveauTicket} style={{ marginTop: 18 }}>
+            Prendre un nouveau ticket
+          </Button>
         </Card>
       </PageShell>
     )
