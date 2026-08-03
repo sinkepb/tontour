@@ -88,6 +88,11 @@ create table tickets (
   telephone        text,
   client_token     uuid not null default gen_random_uuid(), -- secret remis au client, sert de "mot de passe" pour suivre son ticket
   poste_id         uuid references postes(id) on delete set null,
+  -- Copié depuis postes.agent_id au moment de l'appel (appeler_prochain) : postes.agent_id
+  -- change au fil de la journée (déconnexions/reconnexions), donc s'y référer après coup pour
+  -- attribuer une note donnerait le mérite au mauvais vendeur. tickets.agent_id fige qui a
+  -- réellement servi ce ticket, pour les moyennes par vendeur (notes_moyennes_vendeur).
+  agent_id         uuid references agents(id) on delete set null,
   cree_le          timestamptz not null default now(),
   appele_le        timestamptz,
   termine_le       timestamptz,
@@ -96,6 +101,21 @@ create table tickets (
 
 alter table postes
   add constraint fk_poste_ticket_en_cours foreign key (ticket_en_cours_id) references tickets(id) on delete set null;
+
+-- Trace l'offre choisie à l'inscription self-service (onboarding) et l'identifiant
+-- Stripe correspondant. En mode démo (pas de clé Stripe configurée), stripe_customer_id
+-- est une valeur factice ("cus_demo_...") et statut reste 'demo' — aucun paiement réel
+-- n'est jamais traité par cette table ni par le flux d'inscription.
+create table abonnements (
+  id                      uuid primary key default gen_random_uuid(),
+  organisation_id         uuid not null references organisations(id) on delete cascade,
+  plan                    text not null,
+  montant_mensuel_eur     numeric not null default 0,
+  statut                  text not null default 'demo' check (statut in ('demo', 'actif', 'annule')),
+  stripe_customer_id      text,
+  stripe_subscription_id  text,
+  cree_le                 timestamptz not null default now()
+);
 
 create index idx_tickets_queue on tickets (organisation_id, service_id, statut, cree_le);
 -- (cree_le AT TIME ZONE 'UTC')::date plutôt que cree_le::date : le cast direct dépend du
@@ -255,6 +275,74 @@ begin
 end;
 $$;
 
+-- ─── RPC : inscription self-service (route anonyme, depuis la landing page) ─
+-- p_agent_id vient de supabase.auth.signUp() côté client, réalisé juste avant
+-- cet appel : on l'utilise directement plutôt que auth.uid()/la session en
+-- cours, pour que l'inscription fonctionne même si la confirmation email est
+-- activée sur le projet (auth.uid() ne résout alors qu'après confirmation,
+-- alors que le compte auth.users, lui, existe déjà immédiatement).
+-- Provisionne en une transaction : organisation + agent admin + 1er poste +
+-- services par défaut + abonnement (démo Stripe pour l'instant : voir
+-- commentaire sur la table abonnements).
+create or replace function inscrire_organisation(
+  p_agent_id uuid,
+  p_nom text,
+  p_type text,
+  p_adresse text,
+  p_email text,
+  p_agent_nom text,
+  p_plan text,
+  p_montant_mensuel_eur numeric default 0
+)
+returns table (organisation_id uuid)
+language plpgsql security definer set search_path = public as $$
+declare
+  v_org_id uuid;
+begin
+  if p_agent_id is null or not exists (select 1 from auth.users u where u.id = p_agent_id) then
+    raise exception 'Compte introuvable — créez d''abord le compte utilisateur';
+  end if;
+  if exists (select 1 from agents ag where ag.id = p_agent_id) then
+    raise exception 'Ce compte est déjà rattaché à une organisation';
+  end if;
+  if p_type not in ('mairie', 'boutique') then
+    raise exception 'Type d''organisation invalide';
+  end if;
+  if coalesce(trim(p_nom), '') = '' then
+    raise exception 'Le nom de l''organisation est requis';
+  end if;
+
+  insert into organisations (nom, type, adresse, couleur_principale, couleur_secondaire)
+  values (
+    p_nom, p_type, nullif(trim(p_adresse), ''),
+    case when p_type = 'boutique' then '#4f46e5' else '#0f766e' end,
+    case when p_type = 'boutique' then '#818cf8' else '#5eead4' end
+  )
+  returning id into v_org_id;
+
+  insert into agents (id, organisation_id, nom, email, role, statut)
+  values (p_agent_id, v_org_id, p_agent_nom, p_email, 'admin', 'actif');
+
+  insert into postes (organisation_id, nom) values (v_org_id, 'Poste 1');
+
+  -- Services par défaut selon le type, pour que le compte soit utilisable
+  -- immédiatement (l'admin pourra les modifier depuis le back-office).
+  if p_type = 'boutique' then
+    insert into services (organisation_id, prefixe_ticket, nom, temps_moyen_min, poids) values
+      (v_org_id, 'V', 'Ventes', 6, 1),
+      (v_org_id, 'S', 'SAV', 10, 2);
+  else
+    insert into services (organisation_id, prefixe_ticket, nom, temps_moyen_min, poids) values
+      (v_org_id, 'A', 'Accueil', 8, 1);
+  end if;
+
+  insert into abonnements (organisation_id, plan, montant_mensuel_eur, statut, stripe_customer_id)
+  values (v_org_id, p_plan, coalesce(p_montant_mensuel_eur, 0), 'demo', 'cus_demo_' || substr(v_org_id::text, 1, 8));
+
+  return query select v_org_id;
+end;
+$$;
+
 -- ─── RPC : appeler le prochain ticket (poste vendeur) ─────────────────────
 -- Verrouillage transactionnel : FOR UPDATE sur le poste + FOR UPDATE SKIP LOCKED
 -- sur la sélection du ticket, pour empêcher qu'un même ticket soit assigné
@@ -291,7 +379,7 @@ begin
     raise exception 'Aucun ticket en attente pour les services de ce poste';
   end if;
 
-  update tickets set statut = 'en_cours', poste_id = p_poste_id, appele_le = now()
+  update tickets set statut = 'en_cours', poste_id = p_poste_id, agent_id = v_poste.agent_id, appele_le = now()
   where id = v_ticket.id
   returning * into v_ticket;
 
@@ -415,6 +503,33 @@ language sql stable security definer set search_path = public as $$
   having coalesce(extract(epoch from (now() - min(t.cree_le))) / 60, 0) >= o.alerte_delai_min;
 $$;
 
+-- ─── RPC : notes moyennes par service (back-office) ───────────────────────
+create or replace function notes_moyennes(p_organisation_id uuid)
+returns table (service_id uuid, service_nom text, note_moyenne numeric, nb_avis int)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.nom, round(avg(t.note), 2), count(t.note)::int
+  from services s
+  left join tickets t on t.service_id = s.id and t.note is not null
+  where s.organisation_id = p_organisation_id
+  group by s.id, s.nom
+  order by s.nom;
+$$;
+
+-- ─── RPC : notes moyennes par vendeur (back-office) ───────────────────────
+-- Se base sur tickets.agent_id (figé au moment de l'appel), pas sur
+-- postes.agent_id (qui change au fil de la journée) : voir commentaire sur
+-- la colonne dans la définition de la table tickets plus haut.
+create or replace function notes_moyennes_vendeur(p_organisation_id uuid)
+returns table (agent_id uuid, agent_nom text, note_moyenne numeric, nb_avis int)
+language sql stable security definer set search_path = public as $$
+  select a.id, a.nom, round(avg(t.note), 2), count(t.note)::int
+  from agents a
+  left join tickets t on t.agent_id = a.id and t.note is not null
+  where a.organisation_id = p_organisation_id
+  group by a.id, a.nom
+  order by a.nom;
+$$;
+
 -- ============================================================================
 -- Row Level Security
 -- ============================================================================
@@ -485,6 +600,13 @@ create policy postes_admin_delete on postes for delete using (organisation_id = 
 -- (utile pour les stats et le back-office).
 create policy tickets_org_read on tickets for select using (organisation_id = agent_organisation_id());
 revoke all on tickets from anon;
+
+-- abonnements : lecture réservée à l'admin de l'organisation. Écriture uniquement
+-- via inscrire_organisation() (SECURITY DEFINER, contourne la RLS) — aucune
+-- policy insert/update/delete ici, la table n'est jamais modifiée directement.
+alter table abonnements enable row level security;
+create policy abonnements_admin_read on abonnements for select
+  using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 
 -- ============================================================================
 -- Realtime : sans ceci, les abonnements postgres_changes (src/lib/api.js

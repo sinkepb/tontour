@@ -124,6 +124,19 @@ export default function StoryViewer({
         <span className="story-time">à l’instant</span>
       </div>
 
+      {/* Code, rang et attente restent visibles sur TOUTES les slides (pas seulement
+          la slide "ticket") : le client ne doit jamais perdre ces infos en swipant
+          vers une promo ou un quiz. */}
+      {ticket?.code && (
+        <div className="story-sticky-info" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+          <span>🎫 {ticket.code}</span>
+          <span className="story-sticky-dot">•</span>
+          <span>{ticket.position ?? 0} devant vous</span>
+          <span className="story-sticky-dot">•</span>
+          <span>~{ticket.attente_estimee_min ?? 0} min</span>
+        </div>
+      )}
+
       {alert && (
         <div className="story-alert" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
           <span className="story-alert-icon">🔔</span>

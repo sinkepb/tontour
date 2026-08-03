@@ -8,6 +8,7 @@ import QrCode from '../components/QrCode.jsx'
 
 const TABS = [
   ['Statistiques', '📊'],
+  ['Avis clients', '⭐'],
   ['Services', '🛎️'],
   ['Postes & agents', '🖥️'],
   ['Storie', '📣'],
@@ -27,9 +28,11 @@ export default function BackofficePage() {
   const [stats, setStats] = useState(null)
   const [alertes, setAlertes] = useState([])
   const [promotions, setPromotions] = useState([])
+  const [notesServices, setNotesServices] = useState([])
+  const [notesVendeurs, setNotesVendeurs] = useState([])
 
   const refresh = useCallback(async () => {
-    const [o, s, p, ag, st, al, pr] = await Promise.all([
+    const [o, s, p, ag, st, al, pr, ns, nv] = await Promise.all([
       api.getOrganisation(orgId),
       api.getServices(orgId),
       api.listPostes(orgId),
@@ -37,6 +40,8 @@ export default function BackofficePage() {
       api.statsJour(orgId),
       api.servicesEnAlerte(orgId),
       api.listPromotions(orgId, { onlyActive: false }),
+      api.notesMoyennes(orgId),
+      api.notesMoyennesVendeur(orgId),
     ])
     setOrg(o)
     setServices(s)
@@ -45,6 +50,8 @@ export default function BackofficePage() {
     setStats(st)
     setAlertes(al)
     setPromotions(pr)
+    setNotesServices(ns)
+    setNotesVendeurs(nv)
   }, [orgId])
 
   useEffect(() => {
@@ -87,6 +94,7 @@ export default function BackofficePage() {
       )}
 
       {tab === 'Statistiques' && stats && <StatsTab stats={stats} />}
+      {tab === 'Avis clients' && <RatingsTab notesServices={notesServices} notesVendeurs={notesVendeurs} />}
       {tab === 'Services' && <ServicesTab orgId={orgId} services={services} onChange={refresh} />}
       {tab === 'Postes & agents' && <PostesAgentsTab postes={postes} agents={agents} services={services} />}
       {tab === 'Storie' && <PromotionsTab orgId={orgId} promotions={promotions} onChange={refresh} />}
@@ -157,6 +165,72 @@ function StatsTab({ stats }) {
           <div className="label">{label}</div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function Stars({ value }) {
+  if (value == null) return <span className="muted" style={{ fontSize: '0.82rem' }}>Pas encore d’avis</span>
+  const rounded = Math.round(value)
+  return (
+    <span title={`${value} / 5`}>
+      {'⭐'.repeat(rounded)}
+      {'☆'.repeat(5 - rounded)}
+      <span className="muted" style={{ fontSize: '0.78rem', marginLeft: 6 }}>{value.toFixed(2)}/5</span>
+    </span>
+  )
+}
+
+function RatingsTab({ notesServices, notesVendeurs }) {
+  return (
+    <div className="grid grid-2">
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Note moyenne par service</h3>
+        <p className="muted" style={{ fontSize: '0.85rem' }}>
+          Calculée sur les notes 1 à 5 laissées par les clients juste après leur passage.
+        </p>
+        <table className="data-table">
+          <thead><tr><th>Service</th><th>Note moyenne</th><th>Avis</th></tr></thead>
+          <tbody>
+            {notesServices.map((n) => (
+              <tr key={n.service_id}>
+                <td>{n.service_nom}</td>
+                <td><Stars value={n.note_moyenne} /></td>
+                <td className="muted">{n.nb_avis}</td>
+              </tr>
+            ))}
+            {notesServices.length === 0 && (
+              <tr><td colSpan={3} className="muted" style={{ fontSize: '0.85rem' }}>Aucun service pour le moment.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Note moyenne par vendeur</h3>
+        <p className="muted" style={{ fontSize: '0.85rem' }}>
+          Attribuée au vendeur qui a effectivement appelé le ticket, même s’il s’est déconnecté depuis.
+        </p>
+        <table className="data-table">
+          <thead><tr><th>Vendeur</th><th>Note moyenne</th><th>Avis</th></tr></thead>
+          <tbody>
+            {notesVendeurs.map((n) => (
+              <tr key={n.agent_id}>
+                <td>
+                  <div className="row" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                    <Avatar label={n.agent_nom} />
+                    {n.agent_nom}
+                  </div>
+                </td>
+                <td><Stars value={n.note_moyenne} /></td>
+                <td className="muted">{n.nb_avis}</td>
+              </tr>
+            ))}
+            {notesVendeurs.length === 0 && (
+              <tr><td colSpan={3} className="muted" style={{ fontSize: '0.85rem' }}>Aucun agent pour le moment.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
     </div>
   )
 }

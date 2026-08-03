@@ -84,6 +84,7 @@ function seed() {
     agents,
     postes,
     tickets: [],
+    abonnements: [],
   }
 }
 
@@ -93,6 +94,7 @@ function load() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (!parsed.promotions) parsed.promotions = defaultPromotions() // migration : anciennes sessions sans storie personnalisable
+      if (!parsed.abonnements) parsed.abonnements = [] // migration : anciennes sessions sans onboarding self-service
       return parsed
     }
   } catch { /* localStorage indisponible ou JSON corrompu -> reseed */ }
@@ -296,6 +298,10 @@ export function appelerProchain(posteId) {
 
   candidat.statut = 'en_cours'
   candidat.poste_id = posteId
+  // Figé au moment de l'appel, comme côté Postgres (voir commentaire sur
+  // appeler_prochain dans schema.sql) : poste.agent_id peut changer plus tard
+  // dans la journée, la note doit rester attribuée au bon vendeur.
+  candidat.agent_id = poste.agent_id
   candidat.appele_le = new Date().toISOString()
   poste.ticket_en_cours_id = candidat.id
   persist()
@@ -406,4 +412,75 @@ export function getTicket(ticketId) {
 
 export function getTicketsOrganisation(organisationId) {
   return state.tickets.filter((t) => t.organisation_id === organisationId)
+}
+
+function averageNote(notes) {
+  if (notes.length === 0) return null
+  return Math.round((notes.reduce((a, b) => a + b, 0) / notes.length) * 100) / 100
+}
+
+export function notesMoyennes(organisationId) {
+  return getServices(organisationId, { onlyActive: false })
+    .map((s) => {
+      const notes = state.tickets.filter((t) => t.service_id === s.id && t.note != null).map((t) => t.note)
+      return { service_id: s.id, service_nom: s.nom, note_moyenne: averageNote(notes), nb_avis: notes.length }
+    })
+    .sort((a, b) => a.service_nom.localeCompare(b.service_nom))
+}
+
+export function notesMoyennesVendeur(organisationId) {
+  return listAgents(organisationId)
+    .map((a) => {
+      const notes = state.tickets.filter((t) => t.agent_id === a.id && t.note != null).map((t) => t.note)
+      return { agent_id: a.id, agent_nom: a.nom, note_moyenne: averageNote(notes), nb_avis: notes.length }
+    })
+    .sort((a, b) => a.agent_nom.localeCompare(b.agent_nom))
+}
+
+/** Inscription self-service (onboarding) : crée organisation + agent admin +
+ * 1er poste + services par défaut + abonnement (démo Stripe pour l'instant),
+ * miroir de la RPC inscrire_organisation() de schema.sql. */
+export function inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur }) {
+  if (state.agents.some((a) => a.email === email)) {
+    throw new Error('Un compte existe déjà avec cet email')
+  }
+  const organisationId = uid()
+  const now = new Date().toISOString()
+
+  state.organisations.push({
+    id: organisationId,
+    nom,
+    type,
+    couleur_principale: type === 'boutique' ? '#4f46e5' : '#0f766e',
+    couleur_secondaire: type === 'boutique' ? '#818cf8' : '#5eead4',
+    logo_url: null,
+    adresse: adresse || null,
+    alerte_delai_min: 15,
+    cree_le: now,
+  })
+
+  state.agents.push({ id: uid(), organisation_id: organisationId, nom: agentNom, email, password, role: 'admin', statut: 'actif' })
+
+  state.postes.push({ id: uid(), organisation_id: organisationId, nom: 'Poste 1', agent_id: null, service_ids: [], ticket_en_cours_id: null, connecte: false, en_pause: false })
+
+  const defaultServices = type === 'boutique'
+    ? [{ prefixe_ticket: 'V', nom: 'Ventes', temps_moyen_min: 6, poids: 1 }, { prefixe_ticket: 'S', nom: 'SAV', temps_moyen_min: 10, poids: 2 }]
+    : [{ prefixe_ticket: 'A', nom: 'Accueil', temps_moyen_min: 8, poids: 1 }]
+  defaultServices.forEach((s) => {
+    state.services.push({ id: uid(), organisation_id: organisationId, actif: true, documents_requis: [], motifs_predefinis: [], ...s })
+  })
+
+  state.abonnements.push({
+    id: uid(),
+    organisation_id: organisationId,
+    plan,
+    montant_mensuel_eur: montantMensuelEur ?? 0,
+    statut: 'demo',
+    stripe_customer_id: `cus_demo_${organisationId.slice(0, 8)}`,
+    stripe_subscription_id: null,
+    cree_le: now,
+  })
+
+  persist()
+  return { organisation_id: organisationId }
 }

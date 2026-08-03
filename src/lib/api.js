@@ -123,6 +123,49 @@ export const api = {
     return data
   },
 
+  async notesMoyennes(organisationId) {
+    if (isDemo) return demo.notesMoyennes(organisationId)
+    const { data, error } = await supabase.rpc('notes_moyennes', { p_organisation_id: organisationId })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  async notesMoyennesVendeur(organisationId) {
+    if (isDemo) return demo.notesMoyennesVendeur(organisationId)
+    const { data, error } = await supabase.rpc('notes_moyennes_vendeur', { p_organisation_id: organisationId })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Inscription self-service (onboarding depuis la landing page). En mode Supabase :
+   * crée d'abord le compte auth (signUp), puis provisionne organisation/agent/postes/
+   * services/abonnement via la RPC SECURITY DEFINER inscrire_organisation — voir le
+   * commentaire sur cette fonction dans schema.sql pour pourquoi p_agent_id est passé
+   * explicitement plutôt que de compter sur auth.uid() (session pas toujours active
+   * immédiatement si la confirmation email est activée sur le projet). */
+  async inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur }) {
+    if (isDemo) return demo.inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur })
+
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password })
+    if (signUpError) throw new Error(signUpError.message)
+    const agentId = signUpData.user?.id
+    if (!agentId) throw new Error('Impossible de créer le compte')
+
+    const { data, error } = await supabase.rpc('inscrire_organisation', {
+      p_agent_id: agentId,
+      p_nom: nom,
+      p_type: type,
+      p_adresse: adresse || null,
+      p_email: email,
+      p_agent_nom: agentNom,
+      p_plan: plan,
+      p_montant_mensuel_eur: montantMensuelEur ?? 0,
+    })
+    if (error) throw new Error(error.message)
+    const row = Array.isArray(data) ? data[0] : data
+    return { organisation_id: row.organisation_id }
+  },
+
   async statsJour(organisationId) {
     if (isDemo) return demo.statsJour(organisationId)
     return unwrapRpc(supabase.rpc('stats_jour', { p_organisation_id: organisationId }))

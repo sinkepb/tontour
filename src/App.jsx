@@ -6,6 +6,7 @@ import MarketingLandingPage from './pages/MarketingLandingPage.jsx'
 import ClientPage from './pages/ClientPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import StaffLoginPage from './pages/StaffLoginPage.jsx'
+import OnboardingPage from './pages/OnboardingPage.jsx'
 import AgentPage from './pages/AgentPage.jsx'
 import BackofficePage from './pages/BackofficePage.jsx'
 import SalleAffichage from './pages/SalleAffichage.jsx'
@@ -33,6 +34,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<MarketingLandingPage />} />
           <Route path="/connexion" element={<StaffLoginPage />} />
+          <Route path="/inscription" element={<OnboardingPage />} />
           {isDemo && <Route path="/demo" element={<LandingPage />} />}
           <Route path="/o/:orgId" element={<ClientPage />} />
           <Route path="/o/:orgId/connexion" element={<LoginPage />} />
