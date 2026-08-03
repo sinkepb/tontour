@@ -184,13 +184,28 @@ export default function ClientPage() {
           <form onSubmit={creerTicket}>
             {selectedService.motifs_predefinis?.length > 0 && (
               <Field label="Motif de votre visite (optionnel)">
-                <select className="input" value={motif} onChange={(e) => setMotif(e.target.value)}>
-                  <option value="">— Choisir un motif —</option>
-                  {selectedService.motifs_predefinis.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                  <option value="__autre__">Autre (préciser)</option>
-                </select>
+                <div className="stack" style={{ gap: 8 }}>
+                  {[...selectedService.motifs_predefinis, '__autre__'].map((m) => {
+                    const checked = motif === m
+                    return (
+                      <Card
+                        key={m}
+                        className="card-clickable"
+                        style={{
+                          marginBottom: 0, padding: '10px 14px',
+                          borderColor: checked ? 'var(--org-primary)' : 'var(--border)',
+                          background: checked ? 'color-mix(in srgb, var(--org-primary) 6%, white)' : 'var(--surface)',
+                        }}
+                        onClick={() => setMotif(m)}
+                      >
+                        <label className="checklist-item" style={{ padding: 0, cursor: 'pointer' }} onClick={(e) => e.stopPropagation()}>
+                          <input type="radio" name="motif" checked={checked} onChange={() => setMotif(m)} />
+                          <span style={{ flex: 1, fontWeight: checked ? 700 : 500 }}>{m === '__autre__' ? 'Autre (préciser)' : m}</span>
+                        </label>
+                      </Card>
+                    )
+                  })}
+                </div>
               </Field>
             )}
             {(motif === '__autre__' || !selectedService.motifs_predefinis?.length) && (
