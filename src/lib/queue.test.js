@@ -43,6 +43,15 @@ describe('selectNextTicket — critère §10 : 3 services de poids différents',
   it('retourne null si aucun ticket en attente', () => {
     expect(selectNextTicket([], poids, ['ventes'])).toBeNull()
   })
+
+  it('traite un service absent de la map de poids comme poids 0 (pas une exception)', () => {
+    const tickets = [
+      { id: 't1', service_id: 'service-non-repertorie', cree_le: '2026-08-02T09:00:00.000Z' },
+      { id: 't2', service_id: 'ventes', cree_le: '2026-08-02T09:05:00.000Z' },
+    ]
+    const next = selectNextTicket(tickets, poids, ['service-non-repertorie', 'ventes'])
+    expect(next.id).toBe('t2') // ventes (poids 1) > service inconnu (poids 0)
+  })
 })
 
 describe('computePosition / computeEtaMinutes', () => {
@@ -60,5 +69,15 @@ describe('computePosition / computeEtaMinutes', () => {
   it('position 0 pour le premier de la file', () => {
     const ticket = { id: 't1', service_id: 'ventes', cree_le: '2026-08-02T09:00:00.000Z' }
     expect(computePosition(ticket, [ticket])).toBe(0)
+  })
+
+  it('un ticket créé exactement à la même seconde ne se compte pas lui-même comme devant lui', () => {
+    const ticket = { id: 't1', service_id: 'ventes', cree_le: '2026-08-02T09:00:00.000Z' }
+    const autreMemeHorodatage = { id: 't2', service_id: 'ventes', cree_le: '2026-08-02T09:00:00.000Z' }
+    expect(computePosition(ticket, [ticket, autreMemeHorodatage])).toBe(0)
+  })
+
+  it('attente estimée nulle en position 0', () => {
+    expect(computeEtaMinutes(0, 10)).toBe(0)
   })
 })

@@ -16,12 +16,12 @@ create extension if not exists pgcrypto;
 
 create table organisations (
   id                  uuid primary key default gen_random_uuid(),
-  nom                 text not null,
+  nom                 text not null check (char_length(nom) between 1 and 200),
   type                text not null check (type in ('mairie', 'boutique')),
   couleur_principale  text not null default '#4f46e5',
   couleur_secondaire  text not null default '#818cf8',
   logo_url            text,
-  adresse             text,
+  adresse             text check (adresse is null or char_length(adresse) <= 300),
   alerte_delai_min    int not null default 15, -- délai avant alerte "service sans poste"
   cree_le             timestamptz not null default now()
 );
@@ -58,8 +58,8 @@ create table promotions (
 create table agents (
   id               uuid primary key references auth.users(id) on delete cascade,
   organisation_id  uuid not null references organisations(id) on delete cascade,
-  nom              text not null,
-  email            text not null,
+  nom              text not null check (char_length(nom) between 1 and 200),
+  email            text not null check (char_length(email) <= 255),
   role             text not null check (role in ('admin', 'vendeur')) default 'vendeur',
   statut           text not null check (statut in ('actif', 'pause', 'deconnecte')) default 'deconnecte',
   cree_le          timestamptz not null default now()
@@ -84,8 +84,10 @@ create table tickets (
   code             text not null,
   statut           text not null check (statut in ('en_attente', 'en_cours', 'termine', 'annule')) default 'en_attente',
   canal            text not null check (canal in ('mobile', 'papier')) default 'mobile',
-  motif            text,
-  telephone        text,
+  -- Bornes de longueur : creer_ticket est appelable directement (anonyme) hors de l'UI,
+  -- qui n'est donc pas une garantie suffisante contre un payload abusif.
+  motif            text check (motif is null or char_length(motif) <= 500),
+  telephone        text check (telephone is null or char_length(telephone) <= 30),
   client_token     uuid not null default gen_random_uuid(), -- secret remis au client, sert de "mot de passe" pour suivre son ticket
   poste_id         uuid references postes(id) on delete set null,
   -- Copié depuis postes.agent_id au moment de l'appel (appeler_prochain) : postes.agent_id
@@ -118,9 +120,17 @@ create table abonnements (
 );
 
 create index idx_tickets_queue on tickets (organisation_id, service_id, statut, cree_le);
--- (cree_le AT TIME ZONE 'UTC')::date plutôt que cree_le::date : le cast direct dépend du
--- fuseau horaire de la session (STABLE, pas IMMUTABLE) et est refusé dans une expression d'index.
-create index idx_tickets_org_jour on tickets (organisation_id, service_id, ((cree_le at time zone 'utc')::date));
+-- Index "plage" plutôt que fonctionnel sur cree_le::date : generer_code_ticket() et
+-- stats_jour() filtrent par bornes (cree_le >= .. and cree_le < ..), sargable directement
+-- sur cet index. Un index fonctionnel sur cree_le::date ne matcherait PAS cette forme de
+-- requête (expression différente) et resterait inutilisé malgré sa présence — piège vérifié
+-- lors de l'audit pré-production : c'était le cas de la version précédente de cet index.
+create index idx_tickets_org_jour on tickets (organisation_id, service_id, cree_le);
+-- Index partiels pour notes_moyennes / notes_moyennes_vendeur (back-office) : ces deux
+-- RPC agrègent uniquement les tickets notés, l'immense majorité des lignes de la table
+-- n'ayant pas de note (note is null) est donc hors du champ de l'index.
+create index idx_tickets_service_note on tickets (service_id) where note is not null;
+create index idx_tickets_agent_note on tickets (agent_id) where note is not null;
 
 -- ─── RGPD : rétention courte du téléphone ──────────────────────────────────
 -- À planifier via pg_cron (Supabase) : purge quotidienne des tickets terminés
@@ -160,10 +170,14 @@ declare
 begin
   select prefixe_ticket into v_prefixe from services where id = new.service_id;
 
+  -- Bornes plutôt que cree_le::date = now()::date : sargable, utilise idx_tickets_org_jour
+  -- (voir commentaire sur cet index plus haut).
   select count(*) + 1 into v_seq
   from tickets
-  where service_id = new.service_id
-    and cree_le::date = now()::date;
+  where organisation_id = new.organisation_id
+    and service_id = new.service_id
+    and cree_le >= date_trunc('day', now())
+    and cree_le < date_trunc('day', now()) + interval '1 day';
 
   new.code := v_prefixe || '-' || lpad(v_seq::text, 2, '0');
   return new;
@@ -194,6 +208,19 @@ begin
   -- serait ambigu entre la colonne services.id et la variable de sortie "id" de la fonction.
   if not exists (select 1 from services s where s.id = p_service_id and s.organisation_id = p_organisation_id and s.actif) then
     raise exception 'Service invalide ou inactif';
+  end if;
+
+  -- Garde-fou anti-spam basique : cette RPC est anonyme et appelable directement (hors
+  -- UI/QR code), sans CAPTCHA. Ce plafond ne remplace pas une vraie protection anti-bot
+  -- (ex. Cloudflare Turnstile) mais borne les dégâts d'un script qui la boucle en direct.
+  if (
+    select count(*) from tickets t
+    where t.organisation_id = p_organisation_id
+      and t.service_id = p_service_id
+      and t.cree_le >= date_trunc('day', now())
+      and t.cree_le < date_trunc('day', now()) + interval '1 day'
+  ) >= 500 then
+    raise exception 'Trop de tickets créés aujourd''hui pour ce service, réessayez plus tard';
   end if;
 
   insert into tickets (organisation_id, service_id, motif, telephone, canal)
@@ -477,7 +504,9 @@ language sql stable security definer set search_path = public as $$
     coalesce(round(avg(extract(epoch from (appele_le - cree_le)) / 60) filter (where appele_le is not null), 1), 0),
     (select count(*)::int from postes where organisation_id = p_organisation_id and connecte)
   from tickets
-  where organisation_id = p_organisation_id and cree_le::date = now()::date;
+  where organisation_id = p_organisation_id
+    and cree_le >= date_trunc('day', now())
+    and cree_le < date_trunc('day', now()) + interval '1 day';
 $$;
 
 -- ─── RPC : alerte "service sans poste connecté" (back-office) ─────────────
@@ -622,9 +651,12 @@ alter publication supabase_realtime add table tickets, postes;
 -- Storage : upload du logo par organisation (back-office § Identité visuelle)
 -- ============================================================================
 
-insert into storage.buckets (id, name, public)
-values ('logos', 'logos', true)
-on conflict (id) do nothing;
+-- file_size_limit/allowed_mime_types : la validation cliente (BackofficePage.jsx,
+-- LOGO_MAX_BYTES + file.type.startsWith('image/')) ne protège que l'UI — un appel direct
+-- à l'API Storage (même authentifié admin) la contournerait sans ces contraintes serveur.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('logos', 'logos', true, 2097152, array['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'])
+on conflict (id) do update set file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
 -- Lecture publique (le logo doit s'afficher dans les 4 interfaces, y compris anonymes).
 create policy "logos_public_read" on storage.objects for select

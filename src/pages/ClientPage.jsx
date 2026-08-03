@@ -43,20 +43,19 @@ export default function ClientPage() {
     refreshTicket()
   }, [orgId, refreshTicket])
 
+  // Pas d'abonnement Realtime ici (vérifié en audit pré-production) : la table tickets
+  // n'accorde volontairement aucun accès à anon (RLS, voir supabase/schema.sql — sans
+  // quoi n'importe quel visiteur de la page pourrait lire les motifs/téléphones de
+  // TOUS les tickets de l'organisation), donc un abonnement postgres_changes anonyme
+  // ne recevrait jamais rien : ouvrir quand même la connexion websocket ne ferait que
+  // consommer un slot de connexion Realtime pour zéro bénéfice. Ce polling (protégé
+  // par client_token via la RPC ticket_status) est donc le seul mécanisme de mise à
+  // jour côté client, pas un simple filet de sécurité.
   useEffect(() => {
-    const unsubscribe = api.subscribeToOrg(orgId, refreshTicket)
-    // Filet de sécurité : la table tickets n'accorde aucun accès direct à anon (RLS,
-    // voir supabase/schema.sql), donc le realtime postgres_changes peut ne jamais
-    // parvenir à un client anonyme selon la configuration du projet Supabase. Ce
-    // polling léger (protégé par client_token via la RPC ticket_status) garantit que
-    // la notification "c'est votre tour" arrive même si le canal realtime est muet.
     const interval = setInterval(() => {
       if (localStorage.getItem(storageKey(orgId))) refreshTicket()
     }, 4000)
-    return () => {
-      unsubscribe()
-      clearInterval(interval)
-    }
+    return () => clearInterval(interval)
   }, [orgId, refreshTicket])
 
   useEffect(() => {

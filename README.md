@@ -149,9 +149,38 @@ Le cahier des charges liste 4 priorités (§8). Ce MVP couvre la **Priorité 1**
 
 > Les tarifs affichés sur la landing page (`/`) sont **indicatifs** — aucune facturation réelle n'est branchée (voir Priorité 4 ci-dessus). Les fonctionnalités marquées "(bientôt)" dans les grilles tarifaires correspondent aux items de cette roadmap.
 
+## Sécurité, charge, checklist avant mise en production
+
+Audit réalisé sur ce dépôt avant un lancement réel :
+
+**Vérifié en conditions réelles (contre le projet Supabase de production, pas seulement en théorie) :**
+- **Isolation Realtime** : un abonnement `postgres_changes` anonyme sur `tickets` ne reçoit rigoureusement rien (RLS appliquée par Supabase Realtime, pas seulement par PostgREST) — un visiteur ne peut donc pas espionner les motifs/téléphones des autres clients de la même organisation en observant le trafic WebSocket. Vérifié aussi entre deux organisations différentes côté agent authentifié (aucune fuite cross-tenant). Conséquence directe : `ClientPage` et `SalleAffichage` (toutes deux publiques/anonymes) ne s'abonnent plus du tout à Realtime — un abonnement anonyme n'y recevrait jamais rien, autant ne pas garder la connexion WebSocket ouverte pour rien ; elles reposent entièrement sur un polling (4s / 10s), qui est donc leur mécanisme de mise à jour normal et non un simple filet de secours.
+- Aucun secret (clé `service_role`, clé Stripe) n'a jamais été commité (historique git entier passé au crible).
+- `npm run lint` et `npm test` passent sans erreur.
+
+**Corrigé lors de cet audit :**
+- `organisations`/`services`/`promotions` avaient un `revoke all` jamais suivi d'un grant d'écriture pour `authenticated` : les policies RLS admin existaient mais étaient inertes (`permission denied`). Voir les `grant` explicites dans `schema.sql`.
+- `stats_jour()` et le trigger `generer_code_ticket()` filtraient par `cree_le::date = now()::date`, une expression qui ne correspondait à AUCUN index existant (le fonctionnel `(cree_le at time zone 'utc')::date` posé plus tôt ne matche pas) — récrit en bornes (`cree_le >= ... and cree_le < ...`), sargable sur `idx_tickets_org_jour`.
+- Ajout d'index partiels pour `notes_moyennes`/`notes_moyennes_vendeur` (`where note is not null`).
+- Bucket Storage `logos` : `file_size_limit`/`allowed_mime_types` posés côté serveur (la validation de `BackofficePage.jsx` ne protégeait que l'UI, pas un appel direct à l'API Storage).
+- Bornes de longueur ajoutées sur les champs texte alimentés par des routes anonymes (`tickets.motif`/`telephone`, `organisations.nom`/`adresse`, `agents.nom`/`email`).
+- Plafond anti-spam basique dans `creer_ticket` (500 tickets/jour/service) — ne remplace pas un vrai CAPTCHA, voir ci-dessous.
+- En-têtes de sécurité HTTP (`vercel.json`) : CSP, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS, cache long sur les assets hashés.
+- Code-splitting (`React.lazy`) : les pages réservées au personnel (agent, back-office, onboarding, connexion) ne sont plus dans le bundle initial du parcours citoyen — `~40 kB` de moins sur la page la plus visitée, celle ouverte sur mobile juste après un scan de QR code.
+
+**Nécessite une action manuelle (hors du champ de `schema.sql`, réglages du dashboard Supabase) :**
+- **Longueur minimale des mots de passe** : le formulaire impose 8 caractères côté client, mais un appel direct à `supabase.auth.signUp` contournerait cette limite si le projet Supabase l'autorise. Dashboard → Authentication → Policies → régler la longueur minimale ≥ 8.
+- **Protection mots de passe compromis** (option "Leaked password protection" du dashboard Supabase) : à activer.
+- **CAPTCHA sur la création de ticket et l'inscription self-service** : `creer_ticket` et `inscrire_organisation` sont des routes anonymes appelables directement (hors UI), sans protection anti-bot au-delà du plafond quotidien ajouté ci-dessus. Une vraie protection nécessite un service tiers (Cloudflare Turnstile, hCaptcha) avec ses propres clés — non configuré dans ce dépôt, à mettre en place avant un lancement à fort trafic.
+- **Séparer les projets Supabase Preview/Production** (déjà noté plus haut) — un seul projet `tontour` sert les deux pour l'instant.
+
+**Charge — non testé en conditions réelles, à faire avant un vrai lancement :**
+- Test de charge (k6/Artillery) avec plusieurs dizaines de tickets/appels simultanés — item déjà listé dans les critères d'acceptation ci-dessous, toujours ouvert.
+- Le polling client (4s, un par onglet ouvert) et l'écran de salle (10s) sont volontairement légers (une RPC ciblée, pas un `select *`), mais leur coût grandit linéairement avec le nombre de clients en attente simultanés — à surveiller si une organisation dépasse largement l'échelle "boutique/mairie unique" visée par ce MVP.
+
 ## Critères d'acceptation (§10) — état
 
-- [x] Parcours client complet, position/ETA, notification temps réel (<2s en mode démo, testé)
+- [x] Parcours client complet, position/ETA, notification (<2s en mode démo ; en production, notification côté client par polling 4s — voir § Sécurité ci-dessus sur pourquoi Realtime ne peut pas servir cet écran)
 - [x] File pondérée testée avec 3 services de poids différents (`queue.test.js` + test manuel documenté)
 - [x] Un seul ticket `en_cours` par poste, refusé sinon (`appeler_prochain` lève une exception ; verrouillage `FOR UPDATE` + `SKIP LOCKED` en production)
 - [x] Branding par organisation sans fuite entre organisations (testé manuellement avec 2 organisations en parallèle)

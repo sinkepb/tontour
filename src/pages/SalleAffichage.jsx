@@ -18,15 +18,15 @@ export default function SalleAffichage() {
     refresh()
   }, [orgId, refresh])
 
+  // Pas d'abonnement Realtime ici : cet écran est public/anonyme (pas de RequireRole
+  // sur cette route), et la table tickets n'accorde aucun accès à anon (RLS) — un
+  // abonnement postgres_changes anonyme ne recevrait donc jamais rien (vérifié en
+  // audit pré-production). Le polling 10s est le seul mécanisme de mise à jour, pas
+  // un filet de sécurité secondaire.
   useEffect(() => {
-    const unsubscribe = api.subscribeToOrg(orgId, refresh)
-    // filet de sécurité en cas de coupure réseau du temps réel (résilience §9) : re-poll périodique
     const poll = setInterval(refresh, 10000)
-    return () => {
-      unsubscribe()
-      clearInterval(poll)
-    }
-  }, [orgId, refresh])
+    return () => clearInterval(poll)
+  }, [refresh])
 
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 1000)
@@ -45,7 +45,7 @@ export default function SalleAffichage() {
           <div className="topbar-title">{org.nom} — Écran de salle</div>
           <div className="topbar-sub row" style={{ justifyContent: 'flex-start', gap: 6 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4ade80', animation: 'pulseDot 1.8s ease infinite' }} />
-            Mise à jour en temps réel
+            Mise à jour automatique
           </div>
         </div>
         <div style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: '1.1rem', opacity: 0.95 }}>
