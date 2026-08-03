@@ -4,10 +4,11 @@ import { api } from '../lib/api.js'
 import { useAuth } from '../lib/AuthContext.jsx'
 import { PageShell, Card, Button, Badge, Avatar, LoadingScreen, EmptyState } from '../components/ui.jsx'
 
-function posteStorageKey(orgId, agentId) {
-  return `tontour_poste_${orgId}_${agentId}`
-}
-
+/** Le vendeur ne choisit plus ni son poste ni ses services : les services sont
+ * attribués par l'admin (back-office → Postes & agents, agents.service_ids), et le
+ * premier poste libre est assigné automatiquement à la connexion (RPC
+ * connecter_poste_auto, verrouillage transactionnel côté serveur pour éviter que
+ * deux vendeurs se voient assigner le même poste). */
 export default function AgentPage() {
   const { orgId } = useParams()
   const { agent, logout } = useAuth()
@@ -15,36 +16,66 @@ export default function AgentPage() {
 
   const [org, setOrg] = useState(null)
   const [services, setServices] = useState([])
-  const [postes, setPostes] = useState([])
-  const [posteId, setPosteId] = useState(() => localStorage.getItem(posteStorageKey(orgId, agent.id)))
-  const [selectedServices, setSelectedServices] = useState([])
   const [poste, setPoste] = useState(null)
+  const [connecting, setConnecting] = useState(true)
+  const [connectError, setConnectError] = useState('')
   const [ticketEnCours, setTicketEnCours] = useState(null)
   const [prochain, setProchain] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
-  const refresh = useCallback(async () => {
-    const p = await api.listPostes(orgId)
-    setPostes(p)
-    if (!posteId) return
-    const current = p.find((x) => x.id === posteId)
-    setPoste(current || null)
-    if (!current) return
-    if (current.ticket_en_cours_id) {
-      setTicketEnCours(await api.getTicket(current.ticket_en_cours_id))
-      setProchain(null)
-    } else {
-      setTicketEnCours(null)
-      setProchain(await api.apercuProchain(posteId))
+  const connecter = useCallback(async () => {
+    try {
+      const p = await api.connecterPosteAuto(agent.id)
+      setPoste(p)
+      setConnectError('')
+    } catch (err) {
+      setConnectError(err.message)
+    } finally {
+      setConnecting(false)
     }
-  }, [orgId, posteId])
+  }, [agent.id])
 
   useEffect(() => {
     api.getOrganisationAuth(orgId).then(setOrg)
     api.getServices(orgId).then(setServices)
   }, [orgId])
+
+  useEffect(() => {
+    connecter()
+  }, [connecter])
+
+  // Tant qu'aucun poste n'est libre, on retente périodiquement — la souscription
+  // Realtime ci-dessous ne peut pas nous prévenir puisque tant qu'on n'a pas de
+  // poste, il n'y a rien à quoi s'abonner.
+  useEffect(() => {
+    if (!connectError) return
+    const retry = setInterval(connecter, 5000)
+    return () => clearInterval(retry)
+  }, [connectError, connecter])
+
+  const refresh = useCallback(async () => {
+    if (!poste) return
+    const tous = await api.listPostes(orgId)
+    const actuel = tous.find((p) => p.id === poste.id)
+    if (!actuel || !actuel.connecte) {
+      // Le poste a été libéré ailleurs (déconnexion forcée depuis le back-office, etc.)
+      // : on retente une connexion automatique plutôt que de rester bloqué.
+      setPoste(null)
+      setConnecting(true)
+      connecter()
+      return
+    }
+    setPoste(actuel)
+    if (actuel.ticket_en_cours_id) {
+      setTicketEnCours(await api.getTicket(actuel.ticket_en_cours_id))
+      setProchain(null)
+    } else {
+      setTicketEnCours(null)
+      setProchain(await api.apercuProchain(actuel.id))
+    }
+  }, [orgId, poste, connecter])
 
   useEffect(() => {
     refresh()
@@ -67,26 +98,6 @@ export default function AgentPage() {
     return services.find((s) => s.id === id)?.nom ?? '—'
   }
 
-  async function choisirPoste(id) {
-    setPosteId(id)
-    localStorage.setItem(posteStorageKey(orgId, agent.id), id)
-    const current = postes.find((x) => x.id === id)
-    setSelectedServices(current?.service_ids ?? [])
-  }
-
-  async function validerServices() {
-    setBusy(true)
-    setError('')
-    try {
-      await api.connecterPoste(posteId, agent.id, selectedServices)
-      await refresh()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function appeler() {
     setBusy(true)
     setError('')
@@ -94,9 +105,9 @@ export default function AgentPage() {
       // Une fois le ticket en cours, la sonnette reste active : on relance juste la
       // notification (sans réassigner) pour rappeler un client qui n'a pas répondu.
       if (ticketEnCours) {
-        await api.rappelerClient(posteId)
+        await api.rappelerClient(poste.id)
       } else {
-        await api.appelerProchain(posteId)
+        await api.appelerProchain(poste.id)
       }
       await refresh()
     } catch (err) {
@@ -110,7 +121,7 @@ export default function AgentPage() {
     setBusy(true)
     setError('')
     try {
-      await api.terminerTraitement(posteId)
+      await api.terminerTraitement(poste.id)
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -123,7 +134,7 @@ export default function AgentPage() {
     setBusy(true)
     setError('')
     try {
-      await api.marquerAbsent(posteId)
+      await api.marquerAbsent(poste.id)
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -133,14 +144,12 @@ export default function AgentPage() {
   }
 
   async function pause() {
-    await api.togglePause(posteId, poste.en_pause)
+    await api.togglePause(poste.id, poste.en_pause)
     await refresh()
   }
 
   async function seDeconnecter() {
-    await api.deconnecterPoste(posteId)
-    localStorage.removeItem(posteStorageKey(orgId, agent.id))
-    setPosteId(null)
+    await api.deconnecterPoste(poste.id)
     setPoste(null)
     await logout()
     navigate(`/o/${orgId}/connexion`)
@@ -148,79 +157,28 @@ export default function AgentPage() {
 
   if (!org) return <LoadingScreen />
 
-  // ─── 1. Choix du poste ─────────────────────────────────────────────────
-  if (!posteId || !poste) {
+  // ─── 1. Connexion automatique en cours / aucun poste disponible ────────
+  if (!poste) {
     return (
       <PageShell organisation={org} title={org.nom} subtitle={`Bonjour ${agent.nom}`}>
-        <Card>
-          <div className="row" style={{ justifyContent: 'flex-start', gap: 12, marginBottom: 4 }}>
-            <Avatar label={agent.nom} large />
-            <div>
-              <h3 style={{ margin: 0 }}>Choisissez votre poste</h3>
-              <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>Vous pourrez le libérer à tout moment.</p>
-            </div>
-          </div>
-          <div className="stack" style={{ marginTop: 14 }}>
-            {postes.map((p) => {
-              const occupe = p.connecte && p.agent_id !== agent.id
-              return (
-                <Card key={p.id} className={occupe ? '' : 'card-clickable'} style={{ opacity: occupe ? 0.55 : 1, marginBottom: 0 }} onClick={occupe ? undefined : () => choisirPoste(p.id)}>
-                  <div className="row">
-                    <div className="row" style={{ justifyContent: 'flex-start', gap: 12 }}>
-                      <span style={{ fontSize: '1.4rem' }}>🖥️</span>
-                      <strong>{p.nom}</strong>
-                    </div>
-                    {occupe ? <Badge variant="muted">Occupé</Badge> : <span className="muted" style={{ fontSize: '1.2rem' }}>→</span>}
-                  </div>
-                </Card>
-              )
-            })}
-          </div>
+        <Card className="center">
+          {connecting ? (
+            <p className="muted">Connexion à un poste…</p>
+          ) : (
+            <>
+              <div style={{ fontSize: '2rem', marginBottom: 8 }}>🖥️</div>
+              <p style={{ fontWeight: 700, margin: '0 0 4px' }}>Aucun poste disponible pour le moment</p>
+              <p className="muted" style={{ fontSize: '0.85rem' }}>
+                {connectError === 'Agent introuvable' ? connectError : 'Tous les postes sont occupés — vous serez connecté·e automatiquement dès qu’un poste se libère.'}
+              </p>
+            </>
+          )}
         </Card>
       </PageShell>
     )
   }
 
-  // ─── 2. Choix des services servis (avant ou en cours de journée) ──────
-  if (!poste.connecte) {
-    return (
-      <PageShell organisation={org} title={poste.nom} subtitle={`${agent.nom} · ${org.nom}`}>
-        <Card>
-          <h3 style={{ marginTop: 0 }}>Quels services servez-vous maintenant ?</h3>
-          <p className="muted" style={{ fontSize: '0.85rem' }}>Vous pourrez changer à tout moment en cours de journée.</p>
-          <div className="stack" style={{ marginTop: 14 }}>
-            {services.map((s) => {
-              const checked = selectedServices.includes(s.id)
-              return (
-                <Card
-                  key={s.id}
-                  className="card-clickable"
-                  style={{ marginBottom: 0, borderColor: checked ? 'var(--org-primary)' : 'var(--border)', background: checked ? 'color-mix(in srgb, var(--org-primary) 6%, white)' : 'var(--surface)' }}
-                  onClick={() => setSelectedServices((cur) => (checked ? cur.filter((id) => id !== s.id) : [...cur, s.id]))}
-                >
-                  <label className="checklist-item" style={{ padding: 0, cursor: 'pointer' }} onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => setSelectedServices((cur) => (checked ? cur.filter((id) => id !== s.id) : [...cur, s.id]))}
-                    />
-                    <span style={{ flex: 1, fontWeight: 600 }}>{s.nom}</span>
-                    <Badge variant="primary">poids {s.poids}</Badge>
-                  </label>
-                </Card>
-              )
-            })}
-          </div>
-          {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
-          <Button block disabled={busy || selectedServices.length === 0} onClick={validerServices} style={{ marginTop: 16 }}>
-            Rejoindre la file
-          </Button>
-        </Card>
-      </PageShell>
-    )
-  }
-
-  // ─── 3. Tableau de bord poste ──────────────────────────────────────────
+  // ─── 2. Tableau de bord poste ──────────────────────────────────────────
   return (
     <PageShell organisation={org} title={poste.nom} subtitle={`${agent.nom} · ${org.nom}`}>
       <Card>
@@ -230,21 +188,11 @@ export default function AgentPage() {
             <div>
               <Badge variant={poste.en_pause ? 'warning' : 'success'}>{poste.en_pause ? 'En pause' : 'Disponible'}</Badge>
               <div className="muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>
-                {poste.service_ids.map(serviceName).join(' · ') || 'aucun service'}
+                {poste.service_ids.map(serviceName).join(' · ') || 'Aucun service attribué — contactez votre administrateur'}
               </div>
             </div>
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <Button
-              sm
-              variant="outline"
-              onClick={() => {
-                setSelectedServices(poste.service_ids)
-                setPoste({ ...poste, connecte: false })
-              }}
-            >
-              Changer services
-            </Button>
             <Button sm variant="outline" onClick={pause}>{poste.en_pause ? 'Reprendre' : 'Pause'}</Button>
             <Button sm variant="danger" onClick={seDeconnecter}>Déconnexion</Button>
           </div>
@@ -253,7 +201,11 @@ export default function AgentPage() {
 
       {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
 
-      {poste.en_pause ? (
+      {poste.service_ids.length === 0 ? (
+        <Card>
+          <EmptyState icon="🛎️">Aucun service ne vous a été attribué. Contactez votre administrateur pour commencer à recevoir des clients.</EmptyState>
+        </Card>
+      ) : poste.en_pause ? (
         <Card>
           <EmptyState icon="⏸️">En pause — reprenez pour recevoir de nouveaux clients.</EmptyState>
         </Card>

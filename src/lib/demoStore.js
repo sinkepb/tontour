@@ -61,11 +61,17 @@ function seed() {
     { id: uid(), organisation_id: ORG_MAIRIE, prefixe_ticket: 'U', nom: 'Urbanisme', temps_moyen_min: 15, poids: 1, actif: true, documents_requis: ['Dossier de permis'], motifs_predefinis: [] },
   ]
 
+  const servicesBoutiqueIds = services.filter((s) => s.organisation_id === ORG_BOUTIQUE).map((s) => s.id)
+  const servicesMairieIds = services.filter((s) => s.organisation_id === ORG_MAIRIE).map((s) => s.id)
+
+  // service_ids : attribués par l'admin (back-office → Postes & agents), pas choisis
+  // par le vendeur lui-même — préremplis ici pour que la démo soit utilisable
+  // immédiatement, sans étape de configuration manuelle.
   const agents = [
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Camille Martin', email: 'vendeur@boutique.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte' },
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Sacha Dupont', email: 'admin@boutique.demo', password: 'admin123', role: 'admin', statut: 'deconnecte' },
-    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Alex Petit', email: 'agent@mairie.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte' },
-    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Morgan Roy', email: 'admin@mairie.demo', password: 'admin123', role: 'admin', statut: 'deconnecte' },
+    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Camille Martin', email: 'vendeur@boutique.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte', service_ids: servicesBoutiqueIds },
+    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Sacha Dupont', email: 'admin@boutique.demo', password: 'admin123', role: 'admin', statut: 'deconnecte', service_ids: [] },
+    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Alex Petit', email: 'agent@mairie.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte', service_ids: servicesMairieIds },
+    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Morgan Roy', email: 'admin@mairie.demo', password: 'admin123', role: 'admin', statut: 'deconnecte', service_ids: [] },
   ]
 
   const postes = [
@@ -95,6 +101,14 @@ function load() {
       const parsed = JSON.parse(raw)
       if (!parsed.promotions) parsed.promotions = defaultPromotions() // migration : anciennes sessions sans storie personnalisable
       if (!parsed.abonnements) parsed.abonnements = [] // migration : anciennes sessions sans onboarding self-service
+      // migration : anciennes sessions où le vendeur choisissait ses services lui-même
+      // à la connexion — reprend ceux de son poste actuel s'il en a un, sinon vide.
+      parsed.agents?.forEach((a) => {
+        if (!a.service_ids) {
+          const posteActuel = parsed.postes?.find((p) => p.agent_id === a.id)
+          a.service_ids = posteActuel?.service_ids ?? []
+        }
+      })
       return parsed
     }
   } catch { /* localStorage indisponible ou JSON corrompu -> reseed */ }
@@ -412,19 +426,34 @@ export function marquerAbsent(posteId) {
   persist()
 }
 
-export function connecterPoste(posteId, agentId, serviceIds) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste) throw new Error('Poste introuvable')
-  poste.agent_id = agentId
-  poste.service_ids = serviceIds
-  poste.connecte = true
-  poste.en_pause = false
+/** Le vendeur ne choisit plus ni poste ni services : miroir de connecter_poste_auto()
+ * (schema.sql) — réutilise le poste déjà connecté de l'agent s'il y en a un, sinon
+ * assigne le premier poste libre avec les services attribués par l'admin. */
+export function connecterPosteAuto(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+
+  const dejaConnecte = state.postes.find((p) => p.organisation_id === agent.organisation_id && p.agent_id === agentId && p.connecte)
+  if (dejaConnecte) return dejaConnecte
+
+  state = load()
+  const libre = state.postes
+    .filter((p) => p.organisation_id === agent.organisation_id && !p.connecte)
+    .sort((a, b) => a.nom.localeCompare(b.nom))[0]
+  if (!libre) throw new Error('Aucun poste disponible actuellement')
+
+  libre.agent_id = agentId
+  libre.service_ids = agent.service_ids ?? []
+  libre.connecte = true
+  libre.en_pause = false
   persist()
+  return libre
 }
 
-export function majServicesPoste(posteId, serviceIds) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  poste.service_ids = serviceIds
+export function majServicesAgent(agentId, serviceIds) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+  agent.service_ids = serviceIds
   persist()
 }
 

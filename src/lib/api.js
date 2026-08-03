@@ -245,15 +245,20 @@ export const api = {
     return data
   },
 
-  async connecterPoste(posteId, agentId, serviceIds) {
-    if (isDemo) return demo.connecterPoste(posteId, agentId, serviceIds)
-    const { error } = await supabase.from('postes').update({ agent_id: agentId, service_ids: serviceIds, connecte: true, en_pause: false }).eq('id', posteId)
-    if (error) throw new Error(error.message)
+  /** Le vendeur ne choisit plus ni poste ni services : le premier poste libre lui est
+   * assigné automatiquement, avec les services que l'admin lui a attribués (voir
+   * majServicesAgent). `agentId` n'est utilisé qu'en mode démo — en mode Supabase, la
+   * RPC identifie l'agent via auth.uid(), pas besoin de le lui repasser. */
+  async connecterPosteAuto(agentId) {
+    if (isDemo) return demo.connecterPosteAuto(agentId)
+    return unwrapRpc(supabase.rpc('connecter_poste_auto'))
   },
 
-  async majServicesPoste(posteId, serviceIds) {
-    if (isDemo) return demo.majServicesPoste(posteId, serviceIds)
-    const { error } = await supabase.from('postes').update({ service_ids: serviceIds }).eq('id', posteId)
+  /** Services qu'un agent est habilité à servir — attribués par l'admin (back-office
+   * → Postes & agents), pas choisis par le vendeur lui-même. */
+  async majServicesAgent(agentId, serviceIds) {
+    if (isDemo) return demo.majServicesAgent(agentId, serviceIds)
+    const { error } = await supabase.from('agents').update({ service_ids: serviceIds }).eq('id', agentId)
     if (error) throw new Error(error.message)
   },
 

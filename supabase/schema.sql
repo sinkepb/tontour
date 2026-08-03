@@ -74,6 +74,10 @@ create table agents (
   email            text not null check (char_length(email) <= 255),
   role             text not null check (role in ('admin', 'vendeur')) default 'vendeur',
   statut           text not null check (statut in ('actif', 'pause', 'deconnecte')) default 'deconnecte',
+  -- Services que cet agent est habilité à servir, attribués par l'admin (back-office
+  -- → Postes & agents) — le vendeur ne les choisit plus lui-même à la connexion.
+  -- Copiés sur postes.service_ids au moment de connecter_poste_auto().
+  service_ids      jsonb not null default '[]',
   -- Si renseigné, cet agent voit en plus la vue consolidée en lecture seule de toutes
   -- les organisations de cette enseigne (indépendant de son organisation_id normale).
   enseigne_id      uuid references enseignes(id) on delete set null,
@@ -406,6 +410,51 @@ begin
   values (v_org_id, p_plan, coalesce(p_montant_mensuel_eur, 0), 'demo', 'cus_demo_' || substr(v_org_id::text, 1, 8));
 
   return query select v_org_id;
+end;
+$$;
+
+-- ─── RPC : connexion automatique à un poste libre (agent) ─────────────────
+-- Le vendeur ne choisit plus son poste ni ses services à la connexion : le premier
+-- poste libre lui est assigné automatiquement, avec les services que l'admin lui a
+-- attribués (agents.service_ids). `FOR UPDATE SKIP LOCKED` empêche que deux vendeurs
+-- se voient assigner le même poste en cas de connexions simultanées (même mécanisme
+-- que appeler_prochain pour les tickets, voir plus bas).
+create or replace function connecter_poste_auto()
+returns postes
+language plpgsql security definer set search_path = public as $$
+declare
+  v_agent agents;
+  v_poste postes;
+begin
+  select * into v_agent from agents where id = auth.uid();
+  if not found then
+    raise exception 'Agent introuvable';
+  end if;
+
+  -- Déjà connecté (ex. rechargement de page) : on réutilise le même poste plutôt que
+  -- d'en assigner un nouveau.
+  select * into v_poste from postes
+  where organisation_id = v_agent.organisation_id and agent_id = v_agent.id and connecte = true
+  limit 1;
+  if found then
+    return v_poste;
+  end if;
+
+  select * into v_poste from postes
+  where organisation_id = v_agent.organisation_id and connecte = false
+  order by nom
+  for update skip locked
+  limit 1;
+
+  if not found then
+    raise exception 'Aucun poste disponible actuellement';
+  end if;
+
+  update postes set agent_id = v_agent.id, service_ids = v_agent.service_ids, connecte = true, en_pause = false
+  where id = v_poste.id
+  returning * into v_poste;
+
+  return v_poste;
 end;
 $$;
 
