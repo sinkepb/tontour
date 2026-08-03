@@ -11,10 +11,10 @@ const SEGMENTS = {
     colorSoft: '#fb923c',
     eyebrow: 'Orange · SFR · Bouygues · Free — franchisés et boutiques propres',
     headline: ['La file d’attente qui ne fait plus ', 'fuir vos clients', '.'],
-    lead: 'Vos clients prennent un ticket en scannant un QR code, patientent où ils veulent, et sont notifiés au bon moment. Vos vendeurs voient uniquement le prochain client à servir — jamais une liste à trier.',
+    lead: 'Vos clients scannent un QR code et leur téléphone devient leur ticket de file d’attente : plus de borne, plus de papier. Ils patientent où ils veulent et sont notifiés au bon moment. Vos vendeurs voient uniquement le prochain client à servir — jamais une liste à trier.',
     problem: 'Une file visible depuis la rue, des clients qui repartent avant même d’être servis, des vendeurs qui gèrent une liste papier plutôt que leurs ventes : la file d’attente physique coûte des clients à chaque boutique, tous les jours.',
     features: [
-      ['🎫', 'QR code par boutique', 'Chaque point de vente a son propre identifiant et son propre code, prêt à imprimer et à coller en vitrine.'],
+      ['🎫', 'Le téléphone comme ticket', 'Chaque point de vente a son QR code, prêt à imprimer et à coller en vitrine : le client scanne, et son téléphone devient son ticket de file d’attente.'],
       ['⚖️', 'File pondérée par priorité', 'Le SAV urgent passe avant une simple vente : réglez le poids de chaque service, la priorité s’applique automatiquement.'],
       ['🔔', 'Notification en temps réel', 'Vibration et notification web dès que le vendeur appelle le client — en moins de 2 secondes.'],
       ['📣', 'Storie personnalisée', 'Diffusez vos offres et promotions pendant l’attente, gérées en quelques clics depuis le back-office.'],
@@ -66,10 +66,10 @@ const SEGMENTS = {
     colorSoft: '#5eead4',
     eyebrow: 'Mairies, CCAS, intercommunalités',
     headline: ['Moins de queue debout, ', 'plus de sérénité', ' à l’accueil.'],
-    lead: 'Les administrés prennent un ticket depuis leur téléphone, patientent assis ou en dehors de la mairie, et sont prévenus quand c’est leur tour. Vos agents gardent une vue simple, jamais une liste à gérer.',
+    lead: 'Les administrés scannent un QR code et leur téléphone devient leur ticket de file d’attente : plus de borne, plus de papier. Ils patientent assis ou en dehors de la mairie, et sont prévenus quand c’est leur tour. Vos agents gardent une vue simple, jamais une liste à gérer.',
     problem: 'Une salle d’attente bondée, des administrés debout dès l’ouverture, un agent d’accueil qui passe plus de temps à faire patienter qu’à orienter : la file physique dégrade l’expérience à chaque passage, sans que personne n’y gagne du temps.',
     features: [
-      ['🎫', 'QR code à l’accueil', 'Affiché à l’entrée du bâtiment — aucune application à installer pour l’administré.'],
+      ['🎫', 'Le téléphone comme ticket', 'Affiché à l’entrée du bâtiment : l’administré scanne, et son téléphone devient son ticket de file d’attente — aucune application à installer.'],
       ['📋', 'Documents à préparer', 'Checklist affichée pendant l’attente : livret de famille, pièce d’identité, dossier de permis…'],
       ['🔔', 'Notification en temps réel', 'L’administré peut sortir de la mairie ou s’asseoir dehors : il est prévenu quand c’est son tour.'],
       ['📣', 'Messages & infos pratiques', 'Diffusez horaires, consignes ou informations utiles pendant l’attente, gérés depuis le back-office.'],
@@ -116,7 +116,7 @@ const SEGMENTS = {
 }
 
 const WORKFLOW = [
-  ['Le client scanne', 'Il choisit son service, précise un motif si besoin, et reçoit un code de passage.'],
+  ['Le téléphone devient le ticket', 'En scannant le QR code, le client choisit son service, précise un motif si besoin, et son téléphone devient son ticket de file d’attente — sans borne ni papier.'],
   ['Il patiente où il veut', 'Position et temps d’attente estimé en direct — il garde juste la page ouverte (même en arrière-plan) et vaque à ses occupations.'],
   ['Le vendeur appelle', 'Notification instantanée (vibration + web push), en moins de 2 secondes.'],
 ]
