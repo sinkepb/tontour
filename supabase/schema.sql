@@ -436,6 +436,11 @@ grant select on organisations to authenticated;
 
 create policy organisations_admin_write on organisations for update
   using (id = agent_organisation_id() and agent_role() = 'admin');
+-- Le "revoke all" ci-dessus retire aussi UPDATE : sans ce grant, la policy
+-- ci-dessus ne sert à rien (Postgres refuse la requête avant même d'évaluer
+-- la RLS) et le back-office ne peut jamais enregistrer le branding
+-- (logo, couleurs) → "permission denied for table organisations".
+grant update (couleur_principale, couleur_secondaire, logo_url) on organisations to authenticated;
 
 -- services : lecture publique (nécessaire pour le choix de service côté client).
 create policy services_public_read on services for select
@@ -446,6 +451,9 @@ create policy services_admin_write on services for insert with check (organisati
 create policy services_admin_update on services for update using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 create policy services_admin_delete on services for delete using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 grant select on services to anon;
+-- Comme pour organisations : les policies insert/update/delete ci-dessus sont
+-- inertes sans le grant de base correspondant pour authenticated.
+grant insert, update, delete on services to authenticated;
 
 -- promotions : lecture publique des messages actifs (storie affichée pendant l'attente),
 -- écriture réservée à l'admin de l'organisation.
@@ -457,6 +465,7 @@ create policy promotions_admin_write on promotions for insert with check (organi
 create policy promotions_admin_update on promotions for update using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 create policy promotions_admin_delete on promotions for delete using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 grant select on promotions to anon;
+grant insert, update, delete on promotions to authenticated;
 
 -- agents : un agent ne voit que les agents de sa propre organisation.
 create policy agents_self_org_read on agents for select using (organisation_id = agent_organisation_id());
