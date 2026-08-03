@@ -23,6 +23,7 @@ export default function AgentPage() {
   const [prochain, setProchain] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
     const p = await api.listPostes(orgId)
@@ -41,7 +42,7 @@ export default function AgentPage() {
   }, [orgId, posteId])
 
   useEffect(() => {
-    api.getOrganisation(orgId).then(setOrg)
+    api.getOrganisationAuth(orgId).then(setOrg)
     api.getServices(orgId).then(setServices)
   }, [orgId])
 
@@ -53,6 +54,14 @@ export default function AgentPage() {
     const unsubscribe = api.subscribeToOrg(orgId, refresh)
     return unsubscribe
   }, [orgId, refresh])
+
+  // Fait avancer l'horloge affichée pour que le bouton "Marquer absent" (activé
+  // seulement après organisations.delai_absence_min) se débloque tout seul à
+  // l'écran, sans que l'agent ait besoin de recharger la page.
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(clock)
+  }, [])
 
   function serviceName(id) {
     return services.find((s) => s.id === id)?.nom ?? '—'
@@ -102,6 +111,19 @@ export default function AgentPage() {
     setError('')
     try {
       await api.terminerTraitement(posteId)
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function marquerAbsent() {
+    setBusy(true)
+    setError('')
+    try {
+      await api.marquerAbsent(posteId)
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -241,9 +263,16 @@ export default function AgentPage() {
         // jamais vers un autre écran qui ferait disparaître les infos du ticket.
         (() => {
           const t = ticketEnCours || prochain
+          const delaiAbsenceMs = (org?.delai_absence_min ?? 5) * 60000
+          const absenceReadyAt = ticketEnCours?.appele_le ? new Date(ticketEnCours.appele_le).getTime() + delaiAbsenceMs : null
+          const absenceReady = absenceReadyAt != null && now >= absenceReadyAt
+          const secondesRestantes = absenceReadyAt != null ? Math.max(0, Math.ceil((absenceReadyAt - now) / 1000)) : 0
           return (
             <div className="hero-card">
-              <div className="hero-label">{ticketEnCours ? 'Client en cours' : 'Prochain client'}</div>
+              <div className="row" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                <div className="hero-label">{ticketEnCours ? 'Client en cours' : 'Prochain client'}</div>
+                {t.prioritaire && <Badge variant="danger">🔴 Prioritaire</Badge>}
+              </div>
               <div className="hero-value">{t.code}</div>
               <div style={{ fontWeight: 600, opacity: 0.92 }}>{serviceName(t.service_id)}</div>
               {t.motif && <div style={{ opacity: 0.85, marginTop: 8, fontSize: '0.9rem' }}>Motif : {t.motif}</div>}
@@ -269,6 +298,20 @@ export default function AgentPage() {
                   ✅ Terminer ce traitement
                 </Button>
               </div>
+              {ticketEnCours && (
+                <div style={{ marginTop: 10 }}>
+                  <Button
+                    variant="outline"
+                    sm
+                    block
+                    disabled={busy || !absenceReady}
+                    onClick={marquerAbsent}
+                    style={{ background: 'rgba(255,255,255,0.1)', borderColor: 'rgba(255,255,255,0.35)', color: 'white' }}
+                  >
+                    🚫 Marquer absent{!absenceReady && ` (dans ${Math.ceil(secondesRestantes / 60)} min)`}
+                  </Button>
+                </div>
+              )}
             </div>
           )
         })()

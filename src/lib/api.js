@@ -31,6 +31,16 @@ export const api = {
     return data
   },
 
+  /** Variante authentifiée (agent/admin) : toutes les colonnes, accordées en RLS à
+   * `authenticated` sans restriction — contrairement à getOrganisation() ci-dessus,
+   * volontairement limité pour le cas anonyme. */
+  async getOrganisationAuth(organisationId) {
+    if (isDemo) return demo.getOrganisation(organisationId)
+    const { data, error } = await supabase.from('organisations').select('*').eq('id', organisationId).single()
+    if (error) throw new Error(error.message)
+    return data
+  },
+
   async getServices(organisationId) {
     if (isDemo) return demo.getServices(organisationId)
     const { data, error } = await supabase.from('services').select('*').eq('organisation_id', organisationId).eq('actif', true)
@@ -68,6 +78,7 @@ export const api = {
         p_motif: params.motif ?? null,
         p_telephone: params.telephone ?? null,
         p_canal: params.canal ?? 'mobile',
+        p_prioritaire: params.prioritaire ?? false,
       })
     )
   },
@@ -83,9 +94,9 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
-  async noterTicket(ticketId, clientToken, note) {
-    if (isDemo) return demo.noterTicket(ticketId, clientToken, note)
-    const { error } = await supabase.rpc('noter_ticket', { p_ticket_id: ticketId, p_client_token: clientToken, p_note: note })
+  async noterTicket(ticketId, clientToken, note, commentaire) {
+    if (isDemo) return demo.noterTicket(ticketId, clientToken, note, commentaire)
+    const { error } = await supabase.rpc('noter_ticket', { p_ticket_id: ticketId, p_client_token: clientToken, p_note: note, p_commentaire: commentaire ?? null })
     if (error) throw new Error(error.message)
   },
 
@@ -111,6 +122,12 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
+  async marquerAbsent(posteId) {
+    if (isDemo) return demo.marquerAbsent(posteId)
+    const { error } = await supabase.rpc('marquer_absent', { p_poste_id: posteId })
+    if (error) throw new Error(error.message)
+  },
+
   async salleAffichage(organisationId) {
     if (isDemo) return demo.salleAffichage(organisationId)
     return unwrapRpc(supabase.rpc('salle_affichage', { p_organisation_id: organisationId }))
@@ -133,6 +150,19 @@ export const api = {
   async notesMoyennesVendeur(organisationId) {
     if (isDemo) return demo.notesMoyennesVendeur(organisationId)
     const { data, error } = await supabase.rpc('notes_moyennes_vendeur', { p_organisation_id: organisationId })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  async listAvisRecents(organisationId, limit = 20) {
+    if (isDemo) return demo.listAvisRecents(organisationId, limit)
+    const { data, error } = await supabase
+      .from('tickets')
+      .select('id, code, service_id, note, commentaire, termine_le')
+      .eq('organisation_id', organisationId)
+      .not('commentaire', 'is', null)
+      .order('termine_le', { ascending: false })
+      .limit(limit)
     if (error) throw new Error(error.message)
     return data
   },
@@ -169,6 +199,29 @@ export const api = {
   async statsJour(organisationId) {
     if (isDemo) return demo.statsJour(organisationId)
     return unwrapRpc(supabase.rpc('stats_jour', { p_organisation_id: organisationId }))
+  },
+
+  async statsTendance(organisationId, jours = 14) {
+    if (isDemo) return demo.statsTendance(organisationId, jours)
+    const { data, error } = await supabase.rpc('stats_tendance', { p_organisation_id: organisationId, p_jours: jours })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  async statsHeures(organisationId, jours = 30) {
+    if (isDemo) return demo.statsHeures(organisationId, jours)
+    const { data, error } = await supabase.rpc('stats_heures', { p_organisation_id: organisationId, p_jours: jours })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Vue consolidée multi-boutiques : n'affiche des données que pour les organisations
+   * de la même enseigne que l'agent connecté (vérifié côté serveur, voir schema.sql). */
+  async statsEnseigne(enseigneId) {
+    if (isDemo) return demo.statsEnseigne(enseigneId)
+    const { data, error } = await supabase.rpc('stats_enseigne', { p_enseigne_id: enseigneId })
+    if (error) throw new Error(error.message)
+    return data
   },
 
   async getTicket(ticketId) {
@@ -256,6 +309,21 @@ export const api = {
   async getTicketsOrganisation(organisationId) {
     if (isDemo) return demo.getTicketsOrganisation(organisationId)
     const { data, error } = await supabase.from('tickets').select('*').eq('organisation_id', organisationId)
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Recherche/historique (back-office) : code (préfixe), téléphone (contient), plage de
+   * dates sur cree_le. Tous les filtres sont optionnels et combinables ; limité à 500
+   * résultats (plus large que listAvisRecents — c'est un outil de support, pas un flux). */
+  async rechercherTickets(organisationId, { code, telephone, dateDebut, dateFin } = {}) {
+    if (isDemo) return demo.rechercherTickets(organisationId, { code, telephone, dateDebut, dateFin })
+    let query = supabase.from('tickets').select('*').eq('organisation_id', organisationId)
+    if (code) query = query.ilike('code', `%${code}%`)
+    if (telephone) query = query.ilike('telephone', `%${telephone}%`)
+    if (dateDebut) query = query.gte('cree_le', new Date(dateDebut).toISOString())
+    if (dateFin) query = query.lt('cree_le', new Date(new Date(dateFin).getTime() + 86400000).toISOString())
+    const { data, error } = await query.order('cree_le', { ascending: false }).limit(500)
     if (error) throw new Error(error.message)
     return data
   },

@@ -10,7 +10,8 @@ export function generateTicketCode(prefixeTicket, nombreTicketsServiceAujourdhui
 
 /**
  * Sélectionne le prochain ticket à servir pour un poste, parmi les services
- * qu'il sert actuellement : poids de service décroissant, puis FIFO.
+ * qu'il sert actuellement : priorité spéciale (PMR, urgence) d'abord — sans
+ * attendre le poids du service — puis poids de service décroissant, puis FIFO.
  * @param {Array} ticketsEnAttente tickets avec statut 'en_attente'
  * @param {Map<string, number>} poidsParService service_id -> poids
  * @param {string[]} serviceIdsPoste services servis par le poste
@@ -20,15 +21,24 @@ export function selectNextTicket(ticketsEnAttente, poidsParService, serviceIdsPo
   if (eligibles.length === 0) return null
 
   return eligibles.sort((a, b) => {
+    const prioDiff = (b.prioritaire ? 1 : 0) - (a.prioritaire ? 1 : 0)
+    if (prioDiff !== 0) return prioDiff
     const poidsDiff = (poidsParService.get(b.service_id) ?? 0) - (poidsParService.get(a.service_id) ?? 0)
     if (poidsDiff !== 0) return poidsDiff
     return a.cree_le.localeCompare(b.cree_le)
   })[0]
 }
 
-/** Nombre de personnes devant ce ticket, au sein de son seul service (le poids d'un autre service n'a pas d'impact). */
+/** Nombre de personnes devant ce ticket, au sein de son seul service : un ticket
+ * prioritaire passe toujours devant les non-prioritaires, quelle que soit l'heure
+ * d'arrivée ; à priorité égale, FIFO. */
 export function computePosition(ticket, tousLesTicketsEnAttenteDuService) {
-  return tousLesTicketsEnAttenteDuService.filter((t) => t.cree_le < ticket.cree_le).length
+  const ticketPrio = !!ticket.prioritaire
+  return tousLesTicketsEnAttenteDuService.filter((t) => {
+    const tPrio = !!t.prioritaire
+    if (tPrio !== ticketPrio) return tPrio
+    return t.cree_le < ticket.cree_le
+  }).length
 }
 
 export function computeEtaMinutes(position, tempsMoyenMin) {

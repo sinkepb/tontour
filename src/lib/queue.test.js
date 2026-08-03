@@ -54,6 +54,28 @@ describe('selectNextTicket — critère §10 : 3 services de poids différents',
   })
 })
 
+describe('selectNextTicket — priorité spéciale (PMR, urgence)', () => {
+  const poids = new Map([['ventes', 1], ['sav', 3]])
+
+  it('un ticket prioritaire passe devant, même sur un service de poids plus faible et arrivé après', () => {
+    const tickets = [
+      { id: 't1', service_id: 'sav', cree_le: '2026-08-02T09:00:00.000Z' }, // poids 3, non prioritaire
+      { id: 't2', service_id: 'ventes', cree_le: '2026-08-02T09:05:00.000Z', prioritaire: true }, // poids 1, prioritaire
+    ]
+    const next = selectNextTicket(tickets, poids, ['ventes', 'sav'])
+    expect(next.id).toBe('t2')
+  })
+
+  it('entre deux tickets prioritaires, le poids du service départage', () => {
+    const tickets = [
+      { id: 't1', service_id: 'ventes', cree_le: '2026-08-02T09:00:00.000Z', prioritaire: true },
+      { id: 't2', service_id: 'sav', cree_le: '2026-08-02T09:05:00.000Z', prioritaire: true },
+    ]
+    const next = selectNextTicket(tickets, poids, ['ventes', 'sav'])
+    expect(next.id).toBe('t2') // sav, poids 3
+  })
+})
+
 describe('computePosition / computeEtaMinutes', () => {
   it("ne compte que les tickets du même service (pas d'impact du poids d'un autre service)", () => {
     const ticket = { id: 't3', service_id: 'ventes', cree_le: '2026-08-02T09:10:00.000Z' }
@@ -79,5 +101,12 @@ describe('computePosition / computeEtaMinutes', () => {
 
   it('attente estimée nulle en position 0', () => {
     expect(computeEtaMinutes(0, 10)).toBe(0)
+  })
+
+  it('un ticket prioritaire créé plus tard compte quand même comme "devant" un non-prioritaire', () => {
+    const nonPrioritaire = { id: 't1', service_id: 'ventes', cree_le: '2026-08-02T09:00:00.000Z' }
+    const prioritaireArriveApres = { id: 't2', service_id: 'ventes', cree_le: '2026-08-02T09:05:00.000Z', prioritaire: true }
+    expect(computePosition(nonPrioritaire, [nonPrioritaire, prioritaireArriveApres])).toBe(1)
+    expect(computePosition(prioritaireArriveApres, [nonPrioritaire, prioritaireArriveApres])).toBe(0)
   })
 })

@@ -46,8 +46,8 @@ export default function LandingPage() {
               <div className="row" style={{ justifyContent: 'flex-start', gap: 14 }}>
                 <span
                   style={{
-                    width: 46, height: 46, borderRadius: 13, flexShrink: 0,
-                    background: `linear-gradient(135deg, ${org.couleur_principale}, ${org.couleur_secondaire})`,
+                    width: 46, height: 46, flexShrink: 0,
+                    background: org.couleur_principale,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', fontWeight: 800, fontSize: '1.2rem', boxShadow: 'var(--shadow-sm)',
                   }}

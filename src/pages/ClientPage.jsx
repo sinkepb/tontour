@@ -16,6 +16,7 @@ export default function ClientPage() {
   const [selectedService, setSelectedService] = useState(null)
   const [motif, setMotif] = useState('')
   const [telephone, setTelephone] = useState('')
+  const [prioritaire, setPrioritaire] = useState(false)
   const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -87,6 +88,7 @@ export default function ClientPage() {
         motif: motif || null,
         telephone: telephone || null,
         canal: 'mobile',
+        prioritaire,
       })
       localStorage.setItem(storageKey(orgId), JSON.stringify({ id: t.id, client_token: t.client_token }))
       setTicket({ ...t, client_token: t.client_token })
@@ -104,6 +106,7 @@ export default function ClientPage() {
     setTicket(null)
     setSelectedService(null)
     setMotif('')
+    setPrioritaire(false)
   }
 
   function toggleDoc(doc) {
@@ -211,6 +214,17 @@ export default function ClientPage() {
                 <textarea className="input" rows={2} value={motif === '__autre__' ? '' : motif} onChange={(e) => setMotif(e.target.value)} />
               </Field>
             )}
+            <Field>
+              <label className="checklist-item" style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                <input type="checkbox" checked={prioritaire} onChange={(e) => setPrioritaire(e.target.checked)} />
+                🔴 Besoin prioritaire (personne à mobilité réduite, urgence)
+              </label>
+              {prioritaire && (
+                <p className="muted" style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
+                  Votre ticket sera traité avant les autres, quel que soit le service.
+                </p>
+              )}
+            </Field>
             <Field label="Téléphone (optionnel — pour SMS de secours si la notification échoue)">
               <input className="input" type="tel" placeholder="06 12 34 56 78" value={telephone} onChange={(e) => setTelephone(e.target.value)} />
             </Field>
@@ -254,20 +268,25 @@ export default function ClientPage() {
   )
 }
 
-/** Notation 1-5 étoiles, envoyée immédiatement au clic (protégée côté serveur par le client_token). */
+/** Notation 1-5 étoiles + commentaire optionnel, envoyés ensemble (protégé côté
+ * serveur par le client_token). Choisir une étoile ouvre le champ commentaire au
+ * lieu d'envoyer immédiatement, pour laisser le temps de l'écrire avant de valider. */
 function RatingWidget({ ticket }) {
   const [note, setNote] = useState(ticket.note ?? null)
+  const [selection, setSelection] = useState(0)
   const [hover, setHover] = useState(0)
+  const [commentaire, setCommentaire] = useState('')
   const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
 
-  async function noter(n) {
-    if (sending || note) return
+  async function envoyer() {
     setSending(true)
+    setError('')
     try {
-      await api.noterTicket(ticket.id, ticket.client_token, n)
-      setNote(n)
-    } catch {
-      // silencieux : la notation n'est pas critique, on laisse le client réessayer
+      await api.noterTicket(ticket.id, ticket.client_token, selection, commentaire || null)
+      setNote(selection)
+    } catch (err) {
+      setError(err.message)
     } finally {
       setSending(false)
     }
@@ -290,17 +309,33 @@ function RatingWidget({ ticket }) {
           <button
             key={n}
             type="button"
-            onClick={() => noter(n)}
+            onClick={() => setSelection(n)}
             onMouseEnter={() => setHover(n)}
             onMouseLeave={() => setHover(0)}
             disabled={sending}
             style={{ background: 'none', border: 'none', cursor: sending ? 'default' : 'pointer', fontSize: '2rem', padding: 2, lineHeight: 1 }}
             aria-label={`${n} étoile${n > 1 ? 's' : ''}`}
           >
-            {n <= hover ? '⭐' : '☆'}
+            {n <= (hover || selection) ? '⭐' : '☆'}
           </button>
         ))}
       </div>
+      {selection > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <textarea
+            className="input"
+            rows={2}
+            placeholder="Un commentaire à ajouter ? (optionnel)"
+            value={commentaire}
+            maxLength={1000}
+            onChange={(e) => setCommentaire(e.target.value)}
+          />
+          {error && <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '6px 0 0' }}>{error}</p>}
+          <Button block disabled={sending} onClick={envoyer} style={{ marginTop: 10 }}>
+            {sending ? 'Envoi…' : 'Envoyer mon avis'}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

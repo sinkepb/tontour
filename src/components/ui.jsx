@@ -31,6 +31,7 @@ const STATUT_BADGE = {
   en_cours: ['En cours', 'primary'],
   termine: ['Terminé', 'success'],
   annule: ['Annulé', 'danger'],
+  absent: ['Absent', 'danger'],
 }
 
 export function StatutBadge({ statut }) {

@@ -29,6 +29,8 @@ export default [
         clearTimeout: 'readonly',
         fetch: 'readonly',
         performance: 'readonly',
+        Blob: 'readonly',
+        URL: 'readonly',
       },
     },
     settings: { react: { version: 'detect' } },

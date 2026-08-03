@@ -44,7 +44,7 @@ export default function SalleAffichage() {
         <div>
           <div className="topbar-title">{org.nom} — Écran de salle</div>
           <div className="topbar-sub row" style={{ justifyContent: 'flex-start', gap: 6 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4ade80', animation: 'pulseDot 1.8s ease infinite' }} />
+            <span style={{ width: 7, height: 7, background: '#4ade80', animation: 'pulseDot 1.8s ease infinite' }} />
             Mise à jour automatique
           </div>
         </div>

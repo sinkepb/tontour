@@ -2,18 +2,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { useAuth } from '../lib/AuthContext.jsx'
-import { PageShell, Card, Button, Field, Badge, Avatar, IconBadge, LoadingScreen } from '../components/ui.jsx'
+import { PageShell, Card, Button, Field, Badge, Avatar, IconBadge, LoadingScreen, StatutBadge } from '../components/ui.jsx'
 import { serviceIcon } from '../lib/serviceIcon.js'
+import { toCsv, downloadCsv } from '../lib/csv.js'
 import QrCode from '../components/QrCode.jsx'
 
 const TABS = [
   ['Statistiques', '📊'],
   ['Avis clients', '⭐'],
+  ['Recherche', '🔍'],
   ['Services', '🛎️'],
   ['Postes & agents', '🖥️'],
   ['Storie', '📣'],
   ['Image de marque', '🎨'],
   ['QR Code', '📱'],
+  ['Widget', '🧩'],
 ]
 
 export default function BackofficePage() {
@@ -30,10 +33,13 @@ export default function BackofficePage() {
   const [promotions, setPromotions] = useState([])
   const [notesServices, setNotesServices] = useState([])
   const [notesVendeurs, setNotesVendeurs] = useState([])
+  const [avisRecents, setAvisRecents] = useState([])
+  const [tendance, setTendance] = useState([])
+  const [heures, setHeures] = useState([])
 
   const refresh = useCallback(async () => {
-    const [o, s, p, ag, st, al, pr, ns, nv] = await Promise.all([
-      api.getOrganisation(orgId),
+    const [o, s, p, ag, st, al, pr, ns, nv, avis, tend, heu] = await Promise.all([
+      api.getOrganisationAuth(orgId),
       api.getServices(orgId),
       api.listPostes(orgId),
       api.listAgents(orgId),
@@ -42,6 +48,9 @@ export default function BackofficePage() {
       api.listPromotions(orgId, { onlyActive: false }),
       api.notesMoyennes(orgId),
       api.notesMoyennesVendeur(orgId),
+      api.listAvisRecents(orgId),
+      api.statsTendance(orgId, 14),
+      api.statsHeures(orgId, 30),
     ])
     setOrg(o)
     setServices(s)
@@ -52,6 +61,9 @@ export default function BackofficePage() {
     setPromotions(pr)
     setNotesServices(ns)
     setNotesVendeurs(nv)
+    setAvisRecents(avis)
+    setTendance(tend)
+    setHeures(heu)
   }, [orgId])
 
   useEffect(() => {
@@ -81,6 +93,9 @@ export default function BackofficePage() {
           ))}
         </div>
         <div className="row" style={{ gap: 10, width: 'auto' }}>
+          {agent.enseigne_id && (
+            <Button as={Link} to="/enseigne" sm variant="outline">🏬 Vue enseigne</Button>
+          )}
           <Avatar label={agent.nom} />
           <Button sm variant="danger" onClick={seDeconnecter}>Déconnexion</Button>
         </div>
@@ -93,13 +108,15 @@ export default function BackofficePage() {
         </div>
       )}
 
-      {tab === 'Statistiques' && stats && <StatsTab stats={stats} />}
-      {tab === 'Avis clients' && <RatingsTab notesServices={notesServices} notesVendeurs={notesVendeurs} />}
+      {tab === 'Statistiques' && stats && <StatsTab stats={stats} tendance={tendance} heures={heures} />}
+      {tab === 'Avis clients' && <RatingsTab notesServices={notesServices} notesVendeurs={notesVendeurs} avisRecents={avisRecents} services={services} />}
+      {tab === 'Recherche' && <SearchTab orgId={orgId} services={services} agents={agents} />}
       {tab === 'Services' && <ServicesTab orgId={orgId} services={services} onChange={refresh} />}
       {tab === 'Postes & agents' && <PostesAgentsTab postes={postes} agents={agents} services={services} />}
       {tab === 'Storie' && <PromotionsTab orgId={orgId} promotions={promotions} onChange={refresh} />}
       {tab === 'Image de marque' && <BrandingTab orgId={orgId} org={org} onChange={refresh} />}
       {tab === 'QR Code' && <QrCodeTab orgId={orgId} org={org} />}
+      {tab === 'Widget' && <WidgetTab orgId={orgId} org={org} />}
     </PageShell>
   )
 }
@@ -148,6 +165,36 @@ function QrCodeTab({ orgId, org }) {
   )
 }
 
+function WidgetTab({ orgId, org }) {
+  const [copied, setCopied] = useState(false)
+  const url = `${window.location.origin}/widget/${orgId}`
+  const snippet = `<iframe src="${url}" title="Prendre un ticket — ${org.nom}" style="width:100%;max-width:420px;height:720px;border:0;"></iframe>`
+
+  async function copier() {
+    try {
+      await navigator.clipboard.writeText(snippet)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <Card>
+      <h3 style={{ marginTop: 0 }}>Widget embarquable</h3>
+      <p className="muted" style={{ fontSize: '0.85rem' }}>
+        Intégrez la prise de ticket directement sur votre propre site web, dans un cadre (<code>&lt;iframe&gt;</code>).
+        Ce lien est le seul autorisé à être affiché en cadre — le reste de l’application le refuse par sécurité.
+      </p>
+      <Field label="Code à coller sur votre site">
+        <textarea className="input" readOnly rows={3} value={snippet} style={{ fontFamily: 'monospace', fontSize: '0.8rem' }} onFocus={(e) => e.target.select()} />
+      </Field>
+      <Button variant="outline" onClick={copier}>{copied ? 'Copié !' : '📋 Copier le code'}</Button>
+    </Card>
+  )
+}
+
 const STAT_META = [
   ['tickets_traites', 'Tickets traités aujourd’hui', '✅', '#16a34a'],
   ['tickets_total', 'Tickets créés aujourd’hui', '🎫', '#2563eb'],
@@ -155,16 +202,60 @@ const STAT_META = [
   ['postes_connectes', 'Postes connectés', '🖥️', '#7c3aed'],
 ]
 
-function StatsTab({ stats }) {
+function StatsTab({ stats, tendance, heures }) {
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-      {STAT_META.map(([key, label, icon, tint]) => (
-        <div className="stat-tile" key={key}>
-          <IconBadge icon={icon} tint={tint} />
-          <div className="value" style={{ marginTop: 12 }}>{stats[key]}</div>
-          <div className="label">{label}</div>
-        </div>
-      ))}
+    <div className="stack">
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+        {STAT_META.map(([key, label, icon, tint]) => (
+          <div className="stat-tile" key={key}>
+            <IconBadge icon={icon} tint={tint} />
+            <div className="value" style={{ marginTop: 12 }}>{stats[key]}</div>
+            <div className="label">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-2">
+        <BarChart
+          title="Tickets créés — 14 derniers jours"
+          data={tendance}
+          valueKey="tickets_crees"
+          label={(d) => new Date(`${d.jour}T00:00:00Z`).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}
+        />
+        <BarChart
+          title="Tickets traités — 14 derniers jours"
+          data={tendance}
+          valueKey="tickets_traites"
+          label={(d) => new Date(`${d.jour}T00:00:00Z`).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}
+        />
+      </div>
+
+      <BarChart
+        title="Heures de pointe — 30 derniers jours"
+        data={heures}
+        valueKey="nb_tickets"
+        label={(d) => d.heure}
+      />
+    </div>
+  )
+}
+
+/** Petit graphique en barres, sans dépendance externe — cohérent avec le design plat
+ * (angles droits) : voir .chart-* dans index.css. */
+function BarChart({ title, data, valueKey, label }) {
+  const max = Math.max(1, ...data.map((d) => d[valueKey]))
+  return (
+    <div className="chart-card">
+      <h3>{title}</h3>
+      <div className="chart-bars">
+        {data.map((d, i) => (
+          <div className="chart-bar-col" key={i} title={`${label(d)} : ${d[valueKey]}`}>
+            <div className="chart-bar-value">{d[valueKey] > 0 ? d[valueKey] : ''}</div>
+            <div className="chart-bar" style={{ height: `${Math.max(2, (d[valueKey] / max) * 100)}%` }} />
+            <div className="chart-bar-label">{label(d)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -181,9 +272,12 @@ function Stars({ value }) {
   )
 }
 
-function RatingsTab({ notesServices, notesVendeurs }) {
+function RatingsTab({ notesServices, notesVendeurs, avisRecents, services }) {
+  function serviceName(id) { return services.find((s) => s.id === id)?.nom ?? '—' }
+
   return (
-    <div className="grid grid-2">
+    <div className="stack">
+    <div className="grid grid-2" style={{ marginBottom: 16 }}>
       <Card>
         <h3 style={{ marginTop: 0 }}>Note moyenne par service</h3>
         <p className="muted" style={{ fontSize: '0.85rem' }}>
@@ -231,6 +325,121 @@ function RatingsTab({ notesServices, notesVendeurs }) {
           </tbody>
         </table>
       </Card>
+    </div>
+
+    <Card>
+      <h3 style={{ marginTop: 0 }}>Commentaires récents</h3>
+      {avisRecents.length === 0 && <p className="muted" style={{ fontSize: '0.85rem' }}>Aucun commentaire pour le moment.</p>}
+      <div className="stack">
+        {avisRecents.map((a) => (
+          <div key={a.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+            <div className="row" style={{ justifyContent: 'flex-start', gap: 10 }}>
+              <span style={{ fontSize: '0.95rem' }}>{'⭐'.repeat(a.note)}{'☆'.repeat(5 - a.note)}</span>
+              <Badge variant="muted">{a.code}</Badge>
+              <Badge variant="muted">{serviceName(a.service_id)}</Badge>
+            </div>
+            <p style={{ fontSize: '0.88rem', margin: '6px 0 0' }}>{a.commentaire}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
+    </div>
+  )
+}
+
+const AVIS_COLONNES = [
+  { label: 'Code', value: (t) => t.code },
+  { label: 'Statut', value: (t) => t.statut },
+  { label: 'Service', value: (t, ctx) => ctx.serviceName(t.service_id) },
+  { label: 'Motif', value: (t) => t.motif ?? '' },
+  { label: 'Téléphone', value: (t) => t.telephone ?? '' },
+  { label: 'Prioritaire', value: (t) => (t.prioritaire ? 'oui' : 'non') },
+  { label: 'Note', value: (t) => t.note ?? '' },
+  { label: 'Commentaire', value: (t) => t.commentaire ?? '' },
+  { label: 'Créé le', value: (t) => t.cree_le },
+  { label: 'Appelé le', value: (t) => t.appele_le ?? '' },
+  { label: 'Terminé le', value: (t) => t.termine_le ?? '' },
+]
+
+function SearchTab({ orgId, services, agents }) {
+  const [code, setCode] = useState('')
+  const [telephone, setTelephone] = useState('')
+  const [dateDebut, setDateDebut] = useState('')
+  const [dateFin, setDateFin] = useState('')
+  const [resultats, setResultats] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  function serviceName(id) { return services.find((s) => s.id === id)?.nom ?? '—' }
+  function agentName(id) { return agents.find((a) => a.id === id)?.nom ?? '—' }
+
+  async function rechercher(e) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      setResultats(await api.rechercherTickets(orgId, { code, telephone, dateDebut, dateFin }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function exporter() {
+    // ctx passé à chaque colonne pour résoudre service_id -> nom sans dupliquer la table de recherche dans le CSV.
+    const columns = AVIS_COLONNES.map((c) => ({ label: c.label, value: (t) => c.value(t, { serviceName }) }))
+    downloadCsv(`tickets-${orgId}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(resultats, columns))
+  }
+
+  return (
+    <div className="stack">
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Recherche de tickets</h3>
+        <p className="muted" style={{ fontSize: '0.85rem' }}>Par code, téléphone ou plage de dates — tous les filtres sont optionnels et combinables.</p>
+        <form onSubmit={rechercher}>
+          <div className="grid grid-2">
+            <Field label="Code du ticket"><input className="input" placeholder="V-01" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+            <Field label="Téléphone"><input className="input" value={telephone} onChange={(e) => setTelephone(e.target.value)} /></Field>
+            <Field label="Du"><input className="input" type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} /></Field>
+            <Field label="Au"><input className="input" type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} /></Field>
+          </div>
+          <Button type="submit" disabled={busy}>{busy ? 'Recherche…' : '🔍 Rechercher'}</Button>
+        </form>
+      </Card>
+
+      {resultats && (
+        <Card>
+          <div className="row" style={{ marginBottom: 12 }}>
+            <h3 style={{ margin: 0 }}>{resultats.length} résultat{resultats.length > 1 ? 's' : ''}</h3>
+            <Button sm variant="outline" disabled={resultats.length === 0} onClick={exporter}>⬇️ Exporter en CSV</Button>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr><th>Code</th><th>Statut</th><th>Service</th><th>Vendeur</th><th>Téléphone</th><th>Note</th><th>Créé le</th></tr>
+              </thead>
+              <tbody>
+                {resultats.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <div className="row" style={{ justifyContent: 'flex-start', gap: 6 }}>
+                        {t.prioritaire && <span title="Prioritaire">🔴</span>}
+                        <strong>{t.code}</strong>
+                      </div>
+                    </td>
+                    <td><StatutBadge statut={t.statut} /></td>
+                    <td>{serviceName(t.service_id)}</td>
+                    <td className="muted">{t.agent_id ? agentName(t.agent_id) : '—'}</td>
+                    <td className="muted">{t.telephone ?? '—'}</td>
+                    <td>{t.note ? `${t.note} ⭐` : '—'}</td>
+                    <td className="muted" style={{ fontSize: '0.8rem' }}>{new Date(t.cree_le).toLocaleString('fr-FR')}</td>
+                  </tr>
+                ))}
+                {resultats.length === 0 && (
+                  <tr><td colSpan={7} className="muted" style={{ fontSize: '0.85rem' }}>Aucun ticket ne correspond à ces critères.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }
@@ -592,7 +801,6 @@ function BrandingTab({ orgId, org, onChange }) {
               style={{
                 width: 60,
                 height: 60,
-                borderRadius: 14,
                 background: '#f1f1f4',
                 display: 'flex',
                 alignItems: 'center',

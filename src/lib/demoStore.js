@@ -76,8 +76,8 @@ function seed() {
 
   return {
     organisations: [
-      { id: ORG_BOUTIQUE, nom: 'Mobile Store Bastille', type: 'boutique', couleur_principale: '#ea580c', couleur_secondaire: '#fb923c', logo_url: null, adresse: '12 rue de la Roquette, 75011 Paris', alerte_delai_min: 15, cree_le: now },
-      { id: ORG_MAIRIE, nom: 'Mairie de Villeneuve', type: 'mairie', couleur_principale: '#0f766e', couleur_secondaire: '#5eead4', logo_url: null, adresse: '1 place de la Mairie, 33140 Villeneuve', alerte_delai_min: 15, cree_le: now },
+      { id: ORG_BOUTIQUE, nom: 'Mobile Store Bastille', type: 'boutique', couleur_principale: '#ea580c', couleur_secondaire: '#fb923c', logo_url: null, adresse: '12 rue de la Roquette, 75011 Paris', alerte_delai_min: 15, delai_absence_min: 5, enseigne_id: null, cree_le: now },
+      { id: ORG_MAIRIE, nom: 'Mairie de Villeneuve', type: 'mairie', couleur_principale: '#0f766e', couleur_secondaire: '#5eead4', logo_url: null, adresse: '1 place de la Mairie, 33140 Villeneuve', alerte_delai_min: 15, delai_absence_min: 5, enseigne_id: null, cree_le: now },
     ],
     services,
     promotions: defaultPromotions(),
@@ -183,14 +183,17 @@ export function ticketStatus(ticketId, clientToken) {
     documents_requis: service?.documents_requis ?? [],
     note: ticket.note ?? null,
     appele_le: ticket.appele_le ?? null,
+    prioritaire: !!ticket.prioritaire,
   }
 }
 
-export function noterTicket(ticketId, clientToken, note) {
+export function noterTicket(ticketId, clientToken, note, commentaire) {
   const ticket = state.tickets.find((t) => t.id === ticketId && t.client_token === clientToken)
   if (!ticket || ticket.statut !== 'termine') throw new Error('Ticket introuvable ou pas encore terminé')
   if (note < 1 || note > 5) throw new Error('Note invalide (1 à 5)')
+  if (commentaire && commentaire.length > 1000) throw new Error('Commentaire trop long (1000 caractères maximum)')
   ticket.note = note
+  ticket.commentaire = commentaire?.trim() || null
   persist()
 }
 
@@ -225,6 +228,59 @@ export function statsJour(organisationId) {
   }
 }
 
+function todayUtcMidnight() {
+  return new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`)
+}
+
+export function statsTendance(organisationId, jours = 14) {
+  const today = todayUtcMidnight()
+  const result = []
+  for (let i = jours - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000)
+    const next = new Date(d.getTime() + 86400000)
+    const dIso = d.toISOString()
+    const nextIso = next.toISOString()
+    const crees = state.tickets.filter((t) => t.organisation_id === organisationId && t.cree_le >= dIso && t.cree_le < nextIso).length
+    const traites = state.tickets.filter(
+      (t) => t.organisation_id === organisationId && t.statut === 'termine' && t.termine_le && t.termine_le >= dIso && t.termine_le < nextIso
+    ).length
+    result.push({ jour: dIso.slice(0, 10), tickets_crees: crees, tickets_traites: traites })
+  }
+  return result
+}
+
+export function statsHeures(organisationId, jours = 30) {
+  const seuil = new Date(todayUtcMidnight().getTime() - (jours - 1) * 86400000).toISOString()
+  const counts = Array(24).fill(0)
+  state.tickets
+    .filter((t) => t.organisation_id === organisationId && t.cree_le >= seuil)
+    .forEach((t) => { counts[new Date(t.cree_le).getUTCHours()]++ })
+  return counts.map((nb, heure) => ({ heure, nb_tickets: nb }))
+}
+
+export function statsEnseigne(enseigneId) {
+  const today = todayUtcMidnight()
+  const tomorrow = new Date(today.getTime() + 86400000).toISOString()
+  const todayIso = today.toISOString()
+  return state.organisations
+    .filter((o) => o.enseigne_id === enseigneId)
+    .map((o) => {
+      const ticketsJour = state.tickets.filter((t) => t.organisation_id === o.id && t.cree_le >= todayIso && t.cree_le < tomorrow)
+      const termines = ticketsJour.filter((t) => t.statut === 'termine')
+      const attentes = termines.filter((t) => t.appele_le).map((t) => (new Date(t.appele_le) - new Date(t.cree_le)) / 60000)
+      const attenteMoy = attentes.length ? attentes.reduce((a, b) => a + b, 0) / attentes.length : 0
+      return {
+        organisation_id: o.id,
+        organisation_nom: o.nom,
+        tickets_traites: termines.length,
+        tickets_total: ticketsJour.length,
+        attente_moyenne_min: Math.round(attenteMoy * 10) / 10,
+        postes_connectes: state.postes.filter((p) => p.organisation_id === o.id && p.connecte).length,
+      }
+    })
+    .sort((a, b) => a.organisation_nom.localeCompare(b.organisation_nom))
+}
+
 export function servicesEnAlerte(organisationId) {
   const org = getOrganisation(organisationId)
   const delai = org?.alerte_delai_min ?? 15
@@ -247,7 +303,7 @@ export function servicesEnAlerte(organisationId) {
 
 // ─── Écritures ─────────────────────────────────────────────────────────
 
-export function creerTicket({ organisation_id, service_id, motif, telephone, canal = 'mobile' }) {
+export function creerTicket({ organisation_id, service_id, motif, telephone, canal = 'mobile', prioritaire = false }) {
   const service = state.services.find((s) => s.id === service_id && s.organisation_id === organisation_id && s.actif)
   if (!service) throw new Error('Service invalide ou inactif')
 
@@ -262,8 +318,11 @@ export function creerTicket({ organisation_id, service_id, motif, telephone, can
     canal,
     motif: motif || null,
     telephone: telephone || null,
+    prioritaire: !!prioritaire,
+    commentaire: null,
     client_token: uid(),
     poste_id: null,
+    agent_id: null,
     cree_le,
     appele_le: null,
     termine_le: null,
@@ -333,6 +392,23 @@ export function rappelerClient(posteId) {
   if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
   const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
   ticket.appele_le = new Date().toISOString()
+  persist()
+}
+
+/** Statut 'absent' (distinct de 'termine') : le client n'était pas là au-delà du
+ * délai de grâce de l'organisation. Vérifié côté serveur, pas seulement dans l'UI. */
+export function marquerAbsent(posteId) {
+  const poste = state.postes.find((p) => p.id === posteId)
+  if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
+  const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+  const org = state.organisations.find((o) => o.id === poste.organisation_id)
+  const delaiMs = (org?.delai_absence_min ?? 5) * 60000
+  if (!ticket.appele_le || Date.now() - new Date(ticket.appele_le).getTime() < delaiMs) {
+    throw new Error('Délai de grâce non écoulé avant de marquer ce client absent')
+  }
+  ticket.statut = 'absent'
+  ticket.termine_le = new Date().toISOString()
+  poste.ticket_en_cours_id = null
   persist()
 }
 
@@ -414,6 +490,19 @@ export function getTicketsOrganisation(organisationId) {
   return state.tickets.filter((t) => t.organisation_id === organisationId)
 }
 
+export function rechercherTickets(organisationId, { code, telephone, dateDebut, dateFin } = {}) {
+  const debut = dateDebut ? new Date(dateDebut).getTime() : null
+  const fin = dateFin ? new Date(dateFin).getTime() + 86400000 : null
+  return state.tickets
+    .filter((t) => t.organisation_id === organisationId)
+    .filter((t) => !code || t.code.toLowerCase().includes(code.toLowerCase()))
+    .filter((t) => !telephone || (t.telephone || '').includes(telephone))
+    .filter((t) => !debut || new Date(t.cree_le).getTime() >= debut)
+    .filter((t) => !fin || new Date(t.cree_le).getTime() < fin)
+    .sort((a, b) => b.cree_le.localeCompare(a.cree_le))
+    .slice(0, 500)
+}
+
 function averageNote(notes) {
   if (notes.length === 0) return null
   return Math.round((notes.reduce((a, b) => a + b, 0) / notes.length) * 100) / 100
@@ -435,6 +524,14 @@ export function notesMoyennesVendeur(organisationId) {
       return { agent_id: a.id, agent_nom: a.nom, note_moyenne: averageNote(notes), nb_avis: notes.length }
     })
     .sort((a, b) => a.agent_nom.localeCompare(b.agent_nom))
+}
+
+export function listAvisRecents(organisationId, limit = 20) {
+  return state.tickets
+    .filter((t) => t.organisation_id === organisationId && t.commentaire)
+    .sort((a, b) => (b.termine_le || '').localeCompare(a.termine_le || ''))
+    .slice(0, limit)
+    .map((t) => ({ id: t.id, code: t.code, service_id: t.service_id, note: t.note, commentaire: t.commentaire, termine_le: t.termine_le }))
 }
 
 /** Inscription self-service (onboarding) : crée organisation + agent admin +

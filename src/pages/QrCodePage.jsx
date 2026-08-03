@@ -25,12 +25,12 @@ export default function QrCodePage() {
     <div className="qr-print-page" style={{ '--org-primary': org.couleur_principale, '--org-secondary': org.couleur_secondaire }}>
       <style>{`
         .qr-print-page { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: 32px 16px; }
-        .qr-poster { background: white; width: 100%; max-width: 480px; border-radius: 28px; box-shadow: 0 20px 48px rgba(20,22,28,0.14), 0 4px 12px rgba(20,22,28,0.06); padding: 48px 40px; text-align: center; animation: popIn 0.35s cubic-bezier(0.22,1,0.36,1) both; }
-        .qr-poster .logo { width: 68px; height: 68px; border-radius: 18px; background: linear-gradient(135deg, var(--org-primary), var(--org-secondary)); color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.7rem; margin: 0 auto 16px; overflow: hidden; box-shadow: 0 6px 16px color-mix(in srgb, var(--org-primary) 40%, transparent); }
+        .qr-poster { background: white; width: 100%; max-width: 480px; box-shadow: 0 20px 48px rgba(20,22,28,0.14), 0 4px 12px rgba(20,22,28,0.06); padding: 48px 40px; text-align: center; animation: fadeInUp 0.3s ease both; }
+        .qr-poster .logo { width: 68px; height: 68px; background: var(--org-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.7rem; margin: 0 auto 16px; overflow: hidden; }
         .qr-poster .logo img { width: 100%; height: 100%; object-fit: cover; }
         .qr-poster h1 { font-size: 1.4rem; margin: 0 0 4px; }
         .qr-poster .tagline { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 28px; }
-        .qr-poster .qr-frame { display: inline-block; padding: 16px; border: 3px solid var(--org-primary); border-radius: 20px; margin-bottom: 20px; }
+        .qr-poster .qr-frame { display: inline-block; padding: 16px; border: 3px solid var(--org-primary); margin-bottom: 20px; }
         .qr-poster .instructions { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
         .qr-poster .steps { text-align: left; font-size: 0.85rem; color: var(--text-muted); margin: 20px auto 0; max-width: 320px; line-height: 1.7; }
         .qr-poster .org-id { margin-top: 24px; font-size: 0.7rem; color: var(--text-muted); word-break: break-all; }

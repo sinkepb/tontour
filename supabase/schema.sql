@@ -14,6 +14,16 @@ create extension if not exists pgcrypto;
 
 -- ─── Tables ─────────────────────────────────────────────────────────────
 
+-- Regroupe plusieurs organisations (boutiques) sous une même enseigne, pour la vue
+-- consolidée multi-boutiques du back-office. Rattacher une organisation/un agent à
+-- une enseigne se fait en base pour cette première version (pas d'UI de gestion des
+-- enseignes elles-mêmes — création/assignation par SQL, voir README).
+create table enseignes (
+  id       uuid primary key default gen_random_uuid(),
+  nom      text not null check (char_length(nom) between 1 and 200),
+  cree_le  timestamptz not null default now()
+);
+
 create table organisations (
   id                  uuid primary key default gen_random_uuid(),
   nom                 text not null check (char_length(nom) between 1 and 200),
@@ -23,6 +33,8 @@ create table organisations (
   logo_url            text,
   adresse             text check (adresse is null or char_length(adresse) <= 300),
   alerte_delai_min    int not null default 15, -- délai avant alerte "service sans poste"
+  delai_absence_min   int not null default 5, -- délai après appel avant de pouvoir marquer le client absent
+  enseigne_id         uuid references enseignes(id) on delete set null,
   cree_le             timestamptz not null default now()
 );
 
@@ -62,6 +74,9 @@ create table agents (
   email            text not null check (char_length(email) <= 255),
   role             text not null check (role in ('admin', 'vendeur')) default 'vendeur',
   statut           text not null check (statut in ('actif', 'pause', 'deconnecte')) default 'deconnecte',
+  -- Si renseigné, cet agent voit en plus la vue consolidée en lecture seule de toutes
+  -- les organisations de cette enseigne (indépendant de son organisation_id normale).
+  enseigne_id      uuid references enseignes(id) on delete set null,
   cree_le          timestamptz not null default now()
 );
 
@@ -82,12 +97,21 @@ create table tickets (
   organisation_id  uuid not null references organisations(id) on delete cascade,
   service_id       uuid not null references services(id) on delete cascade,
   code             text not null,
-  statut           text not null check (statut in ('en_attente', 'en_cours', 'termine', 'annule')) default 'en_attente',
+  -- 'absent' : le client n'était pas là quand l'agent a appelé, au-delà du délai de
+  -- grâce (organisations.delai_absence_min) — distinct de 'annule' (annulation
+  -- volontaire par le client avant même d'être appelé), pour un reporting fiable.
+  statut           text not null check (statut in ('en_attente', 'en_cours', 'termine', 'annule', 'absent')) default 'en_attente',
   canal            text not null check (canal in ('mobile', 'papier')) default 'mobile',
   -- Bornes de longueur : creer_ticket est appelable directement (anonyme) hors de l'UI,
   -- qui n'est donc pas une garantie suffisante contre un payload abusif.
   motif            text check (motif is null or char_length(motif) <= 500),
   telephone        text check (telephone is null or char_length(telephone) <= 30),
+  -- Priorité spéciale (PMR, urgence) signalée par le client à la prise de ticket :
+  -- passe devant tout le monde, y compris un service de poids plus élevé — voir
+  -- selectNextTicket()/appeler_prochain, le poids ne s'applique qu'entre tickets
+  -- de même statut de priorité.
+  prioritaire      boolean not null default false,
+  commentaire      text check (commentaire is null or char_length(commentaire) <= 1000), -- avis client, laissé avec la note
   client_token     uuid not null default gen_random_uuid(), -- secret remis au client, sert de "mot de passe" pour suivre son ticket
   poste_id         uuid references postes(id) on delete set null,
   -- Copié depuis postes.agent_id au moment de l'appel (appeler_prochain) : postes.agent_id
@@ -160,6 +184,12 @@ language sql stable security definer set search_path = public as $$
   select role from agents where id = auth.uid();
 $$;
 
+create or replace function agent_enseigne_id()
+returns uuid
+language sql stable security definer set search_path = public as $$
+  select enseigne_id from agents where id = auth.uid();
+$$;
+
 -- Génère le code de ticket : PREFIXE-NN, numérotation remise à zéro chaque jour, par service.
 create or replace function generer_code_ticket()
 returns trigger
@@ -197,9 +227,10 @@ create or replace function creer_ticket(
   p_service_id uuid,
   p_motif text default null,
   p_telephone text default null,
-  p_canal text default 'mobile'
+  p_canal text default 'mobile',
+  p_prioritaire boolean default false
 )
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -223,8 +254,8 @@ begin
     raise exception 'Trop de tickets créés aujourd''hui pour ce service, réessayez plus tard';
   end if;
 
-  insert into tickets (organisation_id, service_id, motif, telephone, canal)
-  values (p_organisation_id, p_service_id, p_motif, p_telephone, p_canal)
+  insert into tickets (organisation_id, service_id, motif, telephone, canal, prioritaire)
+  values (p_organisation_id, p_service_id, p_motif, p_telephone, p_canal, coalesce(p_prioritaire, false))
   returning * into v_ticket;
 
   return query select * from ticket_status(v_ticket.id, v_ticket.client_token);
@@ -235,7 +266,7 @@ $$;
 -- Note : "position" est un mot réservé PostgreSQL (syntaxe POSITION(x IN y)) —
 -- doit être entre guillemets doubles dans la déclaration RETURNS TABLE.
 create or replace function ticket_status(p_ticket_id uuid, p_client_token uuid)
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -250,6 +281,8 @@ begin
 
   select temps_moyen_min into v_temps_moyen from services s where s.id = v_ticket.service_id;
 
+  -- Comme selectNextTicket()/computePosition() côté JS : un ticket prioritaire compte
+  -- toujours comme "devant" un non-prioritaire, quelle que soit l'heure d'arrivée.
   return query
   select
     v_ticket.id,
@@ -257,31 +290,37 @@ begin
     v_ticket.client_token,
     v_ticket.statut,
     (select count(*)::int from tickets t
-       where t.service_id = v_ticket.service_id and t.statut = 'en_attente' and t.cree_le < v_ticket.cree_le)
+       where t.service_id = v_ticket.service_id and t.statut = 'en_attente'
+         and (t.prioritaire and not v_ticket.prioritaire or t.prioritaire = v_ticket.prioritaire and t.cree_le < v_ticket.cree_le))
       as "position",
     ((select count(*)::int from tickets t
-       where t.service_id = v_ticket.service_id and t.statut = 'en_attente' and t.cree_le < v_ticket.cree_le)
+       where t.service_id = v_ticket.service_id and t.statut = 'en_attente'
+         and (t.prioritaire and not v_ticket.prioritaire or t.prioritaire = v_ticket.prioritaire and t.cree_le < v_ticket.cree_le))
       * coalesce(v_temps_moyen, 5)) as attente_estimee_min,
     (select p.nom from postes p where p.id = v_ticket.poste_id) as poste_nom,
     (select s.nom from services s where s.id = v_ticket.service_id) as service_nom,
     (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis,
     v_ticket.note,
-    v_ticket.appele_le;
+    v_ticket.appele_le,
+    v_ticket.prioritaire;
 end;
 $$;
 
 -- ─── RPC : notation de la prestation (route citoyenne, anonyme, protégée par token) ─
 -- Autorisée uniquement une fois le ticket terminé, pour éviter qu'un client note
 -- avant d'avoir été servi.
-create or replace function noter_ticket(p_ticket_id uuid, p_client_token uuid, p_note int)
+create or replace function noter_ticket(p_ticket_id uuid, p_client_token uuid, p_note int, p_commentaire text default null)
 returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if p_note < 1 or p_note > 5 then
     raise exception 'Note invalide (1 à 5)';
   end if;
+  if p_commentaire is not null and char_length(p_commentaire) > 1000 then
+    raise exception 'Commentaire trop long (1000 caractères maximum)';
+  end if;
 
-  update tickets t set note = p_note
+  update tickets t set note = p_note, commentaire = nullif(trim(p_commentaire), '')
   where t.id = p_ticket_id and t.client_token = p_client_token and t.statut = 'termine';
   if not found then
     raise exception 'Ticket introuvable ou pas encore terminé';
@@ -392,13 +431,15 @@ begin
     raise exception 'Un ticket est déjà en cours sur ce poste';
   end if;
 
+  -- Priorité spéciale (PMR, urgence) d'abord, sans attendre le poids du service —
+  -- voir selectNextTicket() dans src/lib/queue.js pour l'équivalent démo/tests.
   select t.* into v_ticket
   from tickets t
   join services s on s.id = t.service_id
   where t.organisation_id = v_poste.organisation_id
     and t.statut = 'en_attente'
     and t.service_id in (select jsonb_array_elements_text(v_poste.service_ids)::uuid)
-  order by s.poids desc, t.cree_le asc
+  order by t.prioritaire desc, s.poids desc, t.cree_le asc
   for update of t skip locked
   limit 1;
 
@@ -418,7 +459,7 @@ $$;
 
 -- ─── RPC : aperçu du prochain ticket, sans l'assigner (affichage agent) ───
 create or replace function apercu_prochain(p_poste_id uuid)
-returns table (id uuid, code text, service_id uuid, motif text, cree_le timestamptz)
+returns table (id uuid, code text, service_id uuid, motif text, cree_le timestamptz, prioritaire boolean)
 language plpgsql stable security definer set search_path = public as $$
 declare
   v_poste postes;
@@ -431,13 +472,13 @@ begin
   end if;
 
   return query
-  select t.id, t.code, t.service_id, t.motif, t.cree_le
+  select t.id, t.code, t.service_id, t.motif, t.cree_le, t.prioritaire
   from tickets t
   join services s on s.id = t.service_id
   where t.organisation_id = v_poste.organisation_id
     and t.statut = 'en_attente'
     and t.service_id in (select jsonb_array_elements_text(v_poste.service_ids)::uuid)
-  order by s.poids desc, t.cree_le asc
+  order by t.prioritaire desc, s.poids desc, t.cree_le asc
   limit 1;
 end;
 $$;
@@ -477,6 +518,37 @@ begin
 end;
 $$;
 
+-- ─── RPC : marquer le client en cours comme absent (poste vendeur) ────────
+-- Distinct de terminer_traitement : le client n'a pas été servi, le ticket passe
+-- 'absent' (pas 'termine') pour ne pas fausser les statistiques/moyennes de notes.
+-- Le délai de grâce (organisations.delai_absence_min) est vérifié côté serveur, pas
+-- seulement dans l'UI (AgentPage n'affiche/active le bouton qu'après ce délai, mais
+-- rien n'empêche un appel direct à la RPC avant).
+create or replace function marquer_absent(p_poste_id uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_poste postes;
+  v_ticket tickets;
+  v_delai int;
+begin
+  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id() for update;
+  if not found or v_poste.ticket_en_cours_id is null then
+    raise exception 'Aucun ticket en cours sur ce poste';
+  end if;
+
+  select * into v_ticket from tickets where id = v_poste.ticket_en_cours_id;
+  select delai_absence_min into v_delai from organisations where id = v_poste.organisation_id;
+
+  if v_ticket.appele_le is null or now() < v_ticket.appele_le + make_interval(mins => coalesce(v_delai, 5)) then
+    raise exception 'Délai de grâce non écoulé avant de marquer ce client absent';
+  end if;
+
+  update tickets set statut = 'absent', termine_le = now() where id = v_poste.ticket_en_cours_id;
+  update postes set ticket_en_cours_id = null where id = p_poste_id;
+end;
+$$;
+
 -- ─── RPC : écran de salle (lecture publique, sans données sensibles) ──────
 create or replace function salle_affichage(p_organisation_id uuid)
 returns table (
@@ -507,6 +579,70 @@ language sql stable security definer set search_path = public as $$
   where organisation_id = p_organisation_id
     and cree_le >= date_trunc('day', now())
     and cree_le < date_trunc('day', now()) + interval '1 day';
+$$;
+
+-- ─── RPC : tendance quotidienne, N derniers jours (back-office) ───────────
+create or replace function stats_tendance(p_organisation_id uuid, p_jours int default 14)
+returns table (jour date, tickets_crees int, tickets_traites int)
+language sql stable security definer set search_path = public as $$
+  select
+    d::date,
+    (select count(*)::int from tickets t
+       where t.organisation_id = p_organisation_id and t.cree_le >= d and t.cree_le < d + interval '1 day'),
+    (select count(*)::int from tickets t
+       where t.organisation_id = p_organisation_id and t.statut = 'termine'
+         and t.termine_le >= d and t.termine_le < d + interval '1 day')
+  from generate_series(date_trunc('day', now()) - (greatest(p_jours, 1) - 1) * interval '1 day', date_trunc('day', now()), interval '1 day') as d
+  order by d;
+$$;
+
+-- ─── RPC : répartition par heure de la journée, N derniers jours ("heures de
+-- pointe", back-office) ────────────────────────────────────────────────────
+create or replace function stats_heures(p_organisation_id uuid, p_jours int default 30)
+returns table (heure int, nb_tickets int)
+language sql stable security definer set search_path = public as $$
+  select
+    h::int,
+    (select count(*)::int from tickets t
+       where t.organisation_id = p_organisation_id
+         and t.cree_le >= date_trunc('day', now()) - (greatest(p_jours, 1) - 1) * interval '1 day'
+         and extract(hour from t.cree_le)::int = h)
+  from generate_series(0, 23) as h
+  order by h;
+$$;
+
+-- ─── RPC : vue consolidée multi-boutiques (enseignes, back-office) ────────
+-- N'importe quel agent peut appeler cette RPC (SECURITY DEFINER, contourne la RLS
+-- normale sur tickets/postes) — la protection est le `and o.enseigne_id =
+-- agent_enseigne_id()` : si l'appelant n'a pas cette enseigne_id, la condition est
+-- fausse pour toutes les lignes et la fonction renvoie un jeu de résultats vide.
+create or replace function stats_enseigne(p_enseigne_id uuid)
+returns table (
+  organisation_id uuid,
+  organisation_nom text,
+  tickets_traites int,
+  tickets_total int,
+  attente_moyenne_min numeric,
+  postes_connectes int
+)
+language sql stable security definer set search_path = public as $$
+  select
+    o.id,
+    o.nom,
+    (select count(*)::int from tickets t
+       where t.organisation_id = o.id and t.statut = 'termine'
+         and t.cree_le >= date_trunc('day', now()) and t.cree_le < date_trunc('day', now()) + interval '1 day'),
+    (select count(*)::int from tickets t
+       where t.organisation_id = o.id
+         and t.cree_le >= date_trunc('day', now()) and t.cree_le < date_trunc('day', now()) + interval '1 day'),
+    (select coalesce(round(avg(extract(epoch from (t.appele_le - t.cree_le)) / 60) filter (where t.appele_le is not null), 1), 0)
+       from tickets t
+       where t.organisation_id = o.id
+         and t.cree_le >= date_trunc('day', now()) and t.cree_le < date_trunc('day', now()) + interval '1 day'),
+    (select count(*)::int from postes p where p.organisation_id = o.id and p.connecte)
+  from organisations o
+  where o.enseigne_id = p_enseigne_id and p_enseigne_id = agent_enseigne_id()
+  order by o.nom;
 $$;
 
 -- ─── RPC : alerte "service sans poste connecté" (back-office) ─────────────

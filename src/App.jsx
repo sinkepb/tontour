@@ -17,6 +17,7 @@ const AgentPage = lazy(() => import('./pages/AgentPage.jsx'))
 const BackofficePage = lazy(() => import('./pages/BackofficePage.jsx'))
 const SalleAffichage = lazy(() => import('./pages/SalleAffichage.jsx'))
 const QrCodePage = lazy(() => import('./pages/QrCodePage.jsx'))
+const EnseignePage = lazy(() => import('./pages/EnseignePage.jsx'))
 
 function RequireRole({ role, children }) {
   const { agent, loading } = useAuth()
@@ -25,6 +26,16 @@ function RequireRole({ role, children }) {
   if (loading) return null
   if (!agent || agent.organisation_id !== orgId) return <Navigate to={`/o/${orgId}/connexion`} replace />
   if (role && agent.role !== role && agent.role !== 'admin') return <Navigate to={`/o/${orgId}/connexion`} replace />
+  return children
+}
+
+// Pas d'orgId dans ce chemin (vue transverse à plusieurs organisations) : seule
+// l'authentification est requise ici, EnseignePage gère elle-même le cas où l'agent
+// connecté n'a pas d'enseigne_id (message explicite plutôt qu'une redirection muette).
+function RequireAuth({ children }) {
+  const { agent, loading } = useAuth()
+  if (loading) return null
+  if (!agent) return <Navigate to="/connexion" replace />
   return children
 }
 
@@ -42,8 +53,20 @@ export default function App() {
             <Route path="/" element={<MarketingLandingPage />} />
             <Route path="/connexion" element={<StaffLoginPage />} />
             <Route path="/inscription" element={<OnboardingPage />} />
+            <Route
+              path="/enseigne"
+              element={
+                <RequireAuth>
+                  <EnseignePage />
+                </RequireAuth>
+              }
+            />
             {isDemo && <Route path="/demo" element={<LandingPage />} />}
             <Route path="/o/:orgId" element={<ClientPage />} />
+            {/* Même composant que /o/:orgId : la seule différence est l'en-tête CSP
+                frame-ancestors, ouvert pour ce chemin (voir vercel.json) afin que le
+                client puisse l'intégrer en <iframe> sur son propre site. */}
+            <Route path="/widget/:orgId" element={<ClientPage />} />
             <Route path="/o/:orgId/connexion" element={<LoginPage />} />
             <Route
               path="/o/:orgId/agent"
