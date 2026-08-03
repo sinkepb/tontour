@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { PageShell, Card, Field, Button, LoadingScreen, IconBadge, EmptyState } from '../components/ui.jsx'
@@ -8,6 +8,11 @@ import StoryViewer from '../components/StoryViewer.jsx'
 function storageKey(orgId) {
   return `tontour_ticket_${orgId}`
 }
+
+// "C'est votre tour" doit être impossible à louper : ~12s de vibration en salves
+// (au lieu d'un simple buzz) plutôt qu'une seule longue vibration continue, que la
+// plupart des téléphones tronquent ou ignorent au-delà de quelques centaines de ms.
+const RING_VIBRATE_PATTERN = Array.from({ length: 16 }, () => [500, 300]).flat()
 
 export default function ClientPage() {
   const { orgId } = useParams()
@@ -23,6 +28,61 @@ export default function ClientPage() {
   const [ticket, setTicket] = useState(null)
   const [promotions, setPromotions] = useState([])
   const [checked, setChecked] = useState({})
+  const audioCtxRef = useRef(null)
+  const ringNodesRef = useRef([])
+
+  // L'AudioContext doit être créé/débloqué suite à un geste utilisateur (politique
+  // autoplay des navigateurs) : on le fait à chaque tap sur la page plutôt qu'une
+  // seule fois, pour qu'il reste utilisable même si le navigateur l'a suspendu
+  // entre-temps (onglet remis au premier plan après avoir été en arrière-plan).
+  const ensureAudioContext = useCallback(() => {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtx) return null
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioCtx()
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
+    return audioCtxRef.current
+  }, [])
+
+  useEffect(() => {
+    const unlock = () => ensureAudioContext()
+    document.addEventListener('pointerdown', unlock)
+    return () => document.removeEventListener('pointerdown', unlock)
+  }, [ensureAudioContext])
+
+  const stopRingtone = useCallback(() => {
+    ringNodesRef.current.forEach((osc) => {
+      try { osc.stop() } catch { /* déjà arrêté ou pas encore démarré */ }
+    })
+    ringNodesRef.current = []
+  }, [])
+
+  // Sonnerie synthétisée (bips répétés ~12s) plutôt qu'un fichier audio : pas de
+  // ressource à charger, et ça reste audible même si l'appareil est verrouillé
+  // tant que l'onglet est resté au premier plan.
+  const playRingtone = useCallback(() => {
+    const ctx = ensureAudioContext()
+    if (!ctx) return
+    stopRingtone()
+    const durationMs = 12000
+    const beepEveryMs = 700
+    const beepCount = Math.floor(durationMs / beepEveryMs)
+    for (let i = 0; i < beepCount; i++) {
+      const start = ctx.currentTime + (i * beepEveryMs) / 1000
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = 880
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(0.35, start + 0.02)
+      gain.gain.linearRampToValueAtTime(0, start + 0.3)
+      osc.connect(gain).connect(ctx.destination)
+      osc.start(start)
+      osc.stop(start + 0.32)
+      ringNodesRef.current.push(osc)
+    }
+  }, [ensureAudioContext, stopRingtone])
+
+  useEffect(() => stopRingtone, [stopRingtone])
 
   const refreshTicket = useCallback(async () => {
     const saved = localStorage.getItem(storageKey(orgId))
@@ -61,7 +121,14 @@ export default function ClientPage() {
 
   useEffect(() => {
     if (ticket?.statut !== 'en_cours' && ticket?.statut !== 'termine') return
-    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200])
+    if (ticket.statut === 'en_cours') {
+      // C'est le moment critique (se présenter au poste) : alerte longue et
+      // insistante plutôt qu'un simple buzz, sur le modèle d'une sonnerie d'appel.
+      if ('vibrate' in navigator) navigator.vibrate(RING_VIBRATE_PATTERN)
+      playRingtone()
+    } else if ('vibrate' in navigator) {
+      navigator.vibrate([200, 100, 200])
+    }
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       if (ticket.statut === 'en_cours') {
         new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous au ${ticket.poste_nom}` })
@@ -71,8 +138,8 @@ export default function ClientPage() {
     }
     // ticket.appele_le dans les dépendances : l'agent peut rappeler (sonnette
     // toujours active après le premier appel) sans changer le statut du ticket,
-    // ce re-déclenchement garantit une nouvelle notification à chaque rappel.
-  }, [ticket?.statut, ticket?.code, ticket?.poste_nom, ticket?.appele_le])
+    // ce re-déclenchement garantit une nouvelle alerte à chaque rappel.
+  }, [ticket?.statut, ticket?.code, ticket?.poste_nom, ticket?.appele_le, playRingtone])
 
   async function creerTicket(e) {
     e.preventDefault()
