@@ -22,7 +22,7 @@ export const SEGMENTS = {
       ['📣', 'Storie personnalisée', 'Diffusez vos offres et promotions pendant l’attente, gérées en quelques clics depuis le back-office.'],
       ['🎨', 'Image de marque de la boutique', 'Couleurs et logo appliqués automatiquement sur les 4 interfaces, sans rien configurer côté client.'],
       ['📊', 'Statistiques du jour', 'Tickets traités, temps d’attente moyen, postes connectés — en direct depuis le back-office.'],
-      ['🧑‍🤝‍🧑', 'Un vendeur, plusieurs files', 'Chaque vendeur choisit dynamiquement les services qu’il sert, et peut en changer en cours de journée.'],
+      ['🧑‍🤝‍🧑', 'Un vendeur, plusieurs files', 'L’admin attribue les services à chaque vendeur ; à la connexion, il est assigné automatiquement au premier poste libre — zéro configuration côté comptoir.'],
     ],
     plans: [
       {
