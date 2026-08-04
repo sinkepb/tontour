@@ -7,6 +7,10 @@ const EMPTY_OPTIONS = [{ texte: '', correcte: true }, { texte: '', correcte: fal
 export default function PromotionsTab({ orgId, promotions, onChange }) {
   const [editing, setEditing] = useState(null) // promotion en édition, ou {} pour création
   const [error, setError] = useState('')
+  // Nombre de stories visées : purement indicatif (aide l'admin à savoir combien il
+  // en a prévu), n'est jamais enregistré ni imposé — l'admin peut toujours activer
+  // plus ou moins de stories que ce chiffre.
+  const [objectif, setObjectif] = useState('')
 
   async function save(promotion) {
     setError('')
@@ -19,10 +23,17 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
     }
   }
 
-  async function toggleActif(promo) {
+  async function deplacer(promo, actif) {
     setError('')
     try {
-      await api.upsertPromotion({ ...promo, actif: !promo.actif })
+      const payload = { ...promo, actif }
+      if (actif) {
+        // Réactivée en fin de rotation plutôt que de garder son ancien ordre —
+        // comportement le plus prévisible quand on vient de la faire glisser ici.
+        const ordreMax = Math.max(0, ...promotions.filter((p) => p.actif).map((p) => p.ordre))
+        payload.ordre = ordreMax + 1
+      }
+      await api.upsertPromotion(payload)
       onChange()
     } catch (err) {
       setError(err.message)
@@ -39,6 +50,10 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
     }
   }
 
+  const disponibles = promotions.filter((p) => !p.actif)
+  const affichees = promotions.filter((p) => p.actif).slice().sort((a, b) => a.ordre - b.ordre)
+  const objectifNum = Number(objectif) || null
+
   return (
     <Card>
       <div className="row" style={{ marginBottom: 4 }}>
@@ -46,40 +61,78 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
         <Button sm onClick={() => setEditing({})}>+ Nouveau</Button>
       </div>
       <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>
-        Diffusés en rotation façon storie (barre de progression, swipe) sur l’écran du client pendant son attente. Seuls les éléments actifs sont visibles.
+        Diffusées en rotation façon storie (barre de progression, swipe) sur l’écran du client pendant son attente.
+        Déplacez une storie vers « Affichées aux clients » pour l’activer.
       </p>
+
+      <Field label="Nombre de stories visées (indicatif — n’empêche pas d’en activer plus ou moins)">
+        <input
+          className="input"
+          type="number"
+          min={0}
+          placeholder="ex. 4"
+          value={objectif}
+          onChange={(e) => setObjectif(e.target.value)}
+          style={{ maxWidth: 140 }}
+        />
+      </Field>
+
       {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
-      {promotions.length === 0 && !editing && (
-        <p className="muted" style={{ fontSize: '0.85rem' }}>Aucun message pour le moment.</p>
-      )}
-      <div className="stack">
-        {promotions.map((p) => (
-          <Card key={p.id} style={{ marginBottom: 0, opacity: p.actif ? 1 : 0.55 }}>
-            <div className="row" style={{ alignItems: 'flex-start' }}>
-              <div>
-                <div className="row" style={{ justifyContent: 'flex-start', gap: 8 }}>
-                  <strong>{p.titre}</strong>
-                  <Badge variant={p.type === 'quiz' ? 'primary' : 'muted'}>{p.type === 'quiz' ? '🎮 Quiz' : '💬 Message'}</Badge>
-                  <Badge variant={p.actif ? 'success' : 'muted'}>{p.actif ? 'Actif' : 'Masqué'}</Badge>
-                </div>
-                <p className="muted" style={{ fontSize: '0.85rem', margin: '6px 0 0' }}>{p.texte}</p>
-                {p.type === 'quiz' && (
-                  <p className="muted" style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
-                    Bonne réponse : {p.options?.find((o) => o.correcte)?.texte ?? '—'}
-                  </p>
-                )}
-              </div>
-              <div className="row" style={{ gap: 6, justifyContent: 'flex-end', flexShrink: 0 }}>
-                <Button sm variant="outline" onClick={() => toggleActif(p)}>{p.actif ? 'Masquer' : 'Activer'}</Button>
-                <Button sm variant="outline" onClick={() => setEditing(p)}>Modifier</Button>
-                <Button sm variant="danger" onClick={() => remove(p.id)}>Supprimer</Button>
-              </div>
-            </div>
-          </Card>
-        ))}
+
+      <div className="grid grid-2" style={{ alignItems: 'start', marginTop: 8 }}>
+        <div>
+          <h4 style={colHeadStyle}>Disponibles ({disponibles.length})</h4>
+          <div className="stack" style={{ gap: 8 }}>
+            {disponibles.length === 0 && (
+              <p className="muted" style={{ fontSize: '0.85rem' }}>Aucune storie disponible.</p>
+            )}
+            {disponibles.map((p) => (
+              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p.id)}>
+                <Button sm variant="outline" onClick={() => deplacer(p, true)} aria-label={`Afficher la storie « ${p.titre} » aux clients`}>
+                  Afficher →
+                </Button>
+              </StoryRow>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 style={colHeadStyle}>Affichées aux clients ({affichees.length}{objectifNum ? ` / ${objectifNum}` : ''})</h4>
+          <div className="stack" style={{ gap: 8 }}>
+            {affichees.length === 0 && (
+              <p className="muted" style={{ fontSize: '0.85rem' }}>Aucune storie affichée pour le moment — les clients ne verront aucune promo.</p>
+            )}
+            {affichees.map((p) => (
+              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p.id)}>
+                <Button sm variant="outline" onClick={() => deplacer(p, false)} aria-label={`Masquer la storie « ${p.titre} »`}>
+                  ← Masquer
+                </Button>
+              </StoryRow>
+            ))}
+          </div>
+        </div>
       </div>
 
       {editing && <PromotionForm promotion={editing} onCancel={() => setEditing(null)} onSave={save} />}
+    </Card>
+  )
+}
+
+const colHeadStyle = { margin: '0 0 10px', fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }
+
+function StoryRow({ promo, onEdit, onRemove, children }) {
+  return (
+    <Card style={{ marginBottom: 0 }}>
+      <div className="row" style={{ justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+        <strong style={{ overflowWrap: 'anywhere' }}>{promo.titre}</strong>
+        <Badge variant={promo.type === 'quiz' ? 'primary' : 'muted'}>{promo.type === 'quiz' ? '🎮 Quiz' : '💬 Message'}</Badge>
+      </div>
+      <p className="muted" style={{ fontSize: '0.82rem', margin: '6px 0 0' }}>{promo.texte}</p>
+      <div className="row" style={{ gap: 6, marginTop: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        {children}
+        <Button sm variant="outline" onClick={onEdit}>Modifier</Button>
+        <Button sm variant="danger" onClick={onRemove}>Supprimer</Button>
+      </div>
     </Card>
   )
 }
