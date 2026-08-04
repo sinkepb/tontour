@@ -297,6 +297,15 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
+  /** Déconnexion forcée par l'admin (back-office) : contrairement à deconnecterPoste
+   * (le vendeur se déconnecte lui-même), remet aussi le ticket en cours en file
+   * d'attente s'il y en a un, au lieu de le laisser orphelin sur un poste libéré. */
+  async deconnecterPosteAdmin(posteId) {
+    if (isDemo) return demo.deconnecterPosteAdmin(posteId)
+    const { error } = await supabase.rpc('deconnecter_poste_admin', { p_poste_id: posteId })
+    if (error) throw new Error(error.message)
+  },
+
   async upsertService(service) {
     if (isDemo) return demo.upsertService(service)
     const { error } = await supabase.from('services').upsert(service)

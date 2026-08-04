@@ -483,6 +483,29 @@ export function deconnecterPoste(posteId) {
   persist()
 }
 
+/** Miroir de deconnecter_poste_admin() : contrairement à deconnecterPoste (le
+ * vendeur se déconnecte lui-même), remet aussi le ticket en cours en file
+ * d'attente s'il y en a un, au lieu de le laisser orphelin sur un poste libéré. */
+export function deconnecterPosteAdmin(posteId) {
+  const poste = state.postes.find((p) => p.id === posteId)
+  if (!poste) throw new Error('Poste introuvable')
+  if (poste.ticket_en_cours_id) {
+    const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+    if (ticket) {
+      ticket.statut = 'en_attente'
+      ticket.poste_id = null
+      ticket.agent_id = null
+      ticket.appele_le = null
+    }
+  }
+  poste.connecte = false
+  poste.en_pause = false
+  poste.agent_id = null
+  poste.service_ids = []
+  poste.ticket_en_cours_id = null
+  persist()
+}
+
 export function upsertService(service) {
   if (service.id) {
     const idx = state.services.findIndex((s) => s.id === service.id)

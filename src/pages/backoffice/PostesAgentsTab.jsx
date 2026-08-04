@@ -20,15 +20,33 @@ export default function PostesAgentsTab({ postes, agents, services, onChange }) 
     }
   }
 
+  async function deconnecter(poste) {
+    if (poste.ticket_en_cours_id) {
+      const ok = window.confirm(
+        `${agentName(poste.agent_id)} est en train de servir un client sur ${poste.nom}. Le déconnecter remettra ce ticket en file d’attente pour un autre vendeur. Continuer ?`
+      )
+      if (!ok) return
+    }
+    setError('')
+    try {
+      await api.deconnecterPosteAdmin(poste.id)
+      onChange()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   return (
     <div className="grid grid-2">
       <Card>
         <h3 style={{ marginTop: 0 }}>Postes</h3>
         <p className="muted" style={{ fontSize: '0.85rem' }}>
-          Le poste libre est assigné automatiquement au vendeur dès sa connexion — rien à configurer ici.
+          Le poste libre est assigné automatiquement au vendeur dès sa connexion. Un poste resté actif à tort
+          (vendeur parti sans se déconnecter…) peut être libéré manuellement ci-dessous.
         </p>
+        {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
         <table className="data-table">
-          <thead><tr><th>Poste</th><th>Statut</th><th>Agent</th><th>Services servis</th></tr></thead>
+          <thead><tr><th>Poste</th><th>Statut</th><th>Agent</th><th>Services servis</th><th></th></tr></thead>
           <tbody>
             {postes.map((p) => (
               <tr key={p.id}>
@@ -45,6 +63,11 @@ export default function PostesAgentsTab({ postes, agents, services, onChange }) 
                   ) : '—'}
                 </td>
                 <td className="muted" style={{ fontSize: '0.8rem' }}>{p.service_ids.map(serviceName).join(', ') || '—'}</td>
+                <td>
+                  {p.connecte && (
+                    <Button sm variant="danger" onClick={() => deconnecter(p)}>Déconnecter</Button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

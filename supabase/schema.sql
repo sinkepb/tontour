@@ -607,6 +607,38 @@ begin
 end;
 $$;
 
+-- ─── RPC : déconnexion forcée d'un poste par l'admin (back-office) ────────
+-- Contrairement à AgentPage (le vendeur se déconnecte lui-même), l'admin peut avoir
+-- besoin de libérer un poste resté "actif" (vendeur parti sans se déconnecter...).
+-- Si un ticket est en cours sur ce poste, il est remis en file d'attente ('en_attente',
+-- poste_id/agent_id/appele_le réinitialisés) plutôt que laissé orphelin — un autre
+-- vendeur pourra le reprendre. cree_le n'est pas touché : le client ne perd pas son
+-- ancienneté dans la file.
+create or replace function deconnecter_poste_admin(p_poste_id uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_poste postes;
+begin
+  if agent_role() <> 'admin' then
+    raise exception 'Réservé aux administrateurs';
+  end if;
+
+  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id() for update;
+  if not found then
+    raise exception 'Poste introuvable';
+  end if;
+
+  if v_poste.ticket_en_cours_id is not null then
+    update tickets set statut = 'en_attente', poste_id = null, agent_id = null, appele_le = null
+    where id = v_poste.ticket_en_cours_id;
+  end if;
+
+  update postes set connecte = false, en_pause = false, agent_id = null, service_ids = '[]'::jsonb, ticket_en_cours_id = null
+  where id = p_poste_id;
+end;
+$$;
+
 -- ─── RPC : écran de salle (lecture publique, sans données sensibles) ──────
 create or replace function salle_affichage(p_organisation_id uuid)
 returns table (
