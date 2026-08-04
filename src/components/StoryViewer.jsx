@@ -27,6 +27,11 @@ export default function StoryViewer({
   const [index, setIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [paused, setPaused] = useState(false)
+  // Pause manuelle et persistante (bouton ⏸, clavier/lecteur d'écran) — distincte de
+  // `paused` qui ne dure que le temps d'un appui maintenu. Sans elle, un défilement
+  // automatique de contenu (>5s, WCAG 2.2.2) n'aurait aucun mécanisme de pause
+  // découvrable pour qui ne peut pas faire d'appui maintenu au doigt.
+  const [pausedByUser, setPausedByUser] = useState(false)
   const [answers, setAnswers] = useState({}) // { [promotionId]: optionIndex }
   const bodyRef = useRef(null)
   const dragRef = useRef(null)
@@ -38,7 +43,7 @@ export default function StoryViewer({
   // Un message d'alerte (sonnette) se pose par-dessus la storie sans la faire
   // disparaître : on met juste le défilement automatique en pause pendant que
   // l'agent appelle, le temps que le client lise l'alerte.
-  const effectivelyPaused = paused || !!alert
+  const effectivelyPaused = paused || pausedByUser || !!alert
 
   const goTo = (next) => {
     if (items.length === 0) return
@@ -122,6 +127,14 @@ export default function StoryViewer({
         <span className="story-avatar">{orgLogo ? <img src={orgLogo} alt="" /> : (orgName || 'T').slice(0, 1)}</span>
         <span className="story-org-name">{orgName}</span>
         <span className="story-time">à l’instant</span>
+        <button
+          type="button"
+          className="story-pause-btn"
+          onClick={() => setPausedByUser((p) => !p)}
+          aria-label={pausedByUser ? 'Reprendre le défilement automatique' : 'Mettre en pause le défilement automatique'}
+        >
+          {pausedByUser ? '▶' : '⏸'}
+        </button>
       </div>
 
       {/* Code, rang et attente restent visibles sur TOUTES les slides (pas seulement
@@ -150,10 +163,35 @@ export default function StoryViewer({
       <div
         className="story-body"
         ref={bodyRef}
+        role="group"
+        aria-label={`Diapositive ${index + 1} sur ${items.length}`}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerLeave={() => dragRef.current && setPaused(false)}
       >
+        {/* Équivalent clavier/lecteur d'écran des zones de tap gauche/droite : de vrais
+            boutons plutôt qu'un gestionnaire de touches sur le conteneur, pour rester
+            utilisables aussi par les technologies d'assistance qui interceptent le tap. */}
+        <button
+          type="button"
+          className="story-nav-btn story-nav-btn--prev"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); goTo(index - 1) }}
+          aria-label="Diapositive précédente"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          className="story-nav-btn story-nav-btn--next"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); goTo(index + 1) }}
+          aria-label="Diapositive suivante"
+        >
+          ›
+        </button>
         {current.type === 'ticket' && <TicketSlide ticket={ticket} />}
         {current.type === 'documents' && <DocumentsSlide ticket={ticket} checked={checkedDocs} onToggle={onToggleDoc} />}
         {current.type === 'message' && <MessageSlide promo={current} />}

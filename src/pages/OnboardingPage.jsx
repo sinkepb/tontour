@@ -162,12 +162,20 @@ export default function OnboardingPage() {
               <Card
                 key={p.key}
                 className="card-clickable"
+                role="button"
+                tabIndex={0}
                 style={{
                   marginBottom: 0,
                   borderColor: planKey === p.key ? 'var(--org-primary)' : 'var(--border)',
                   background: planKey === p.key ? 'color-mix(in srgb, var(--org-primary) 6%, white)' : 'var(--surface)',
                 }}
                 onClick={() => setPlanKey(p.key)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setPlanKey(p.key)
+                  }
+                }}
               >
                 <div className="row">
                   <div>

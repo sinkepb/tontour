@@ -17,6 +17,7 @@ const RING_VIBRATE_PATTERN = Array.from({ length: 16 }, () => [500, 300]).flat()
 export default function ClientPage() {
   const { orgId } = useParams()
   const [org, setOrg] = useState(null)
+  const [orgError, setOrgError] = useState(false)
   const [services, setServices] = useState([])
   const [selectedService, setSelectedService] = useState(null)
   const [motif, setMotif] = useState('')
@@ -97,12 +98,20 @@ export default function ClientPage() {
     }
   }, [orgId])
 
+  // C'est le point d'entrée public de l'app (scan du QR code) : sans ce catch, un
+  // orgId invalide ou une erreur réseau transitoire laissait le client bloqué sur
+  // <LoadingScreen/> indéfiniment, sans message ni moyen de réessayer.
+  const chargerOrg = useCallback(() => {
+    setOrgError(false)
+    api.getOrganisation(orgId).then(setOrg).catch(() => setOrgError(true))
+  }, [orgId])
+
   useEffect(() => {
-    api.getOrganisation(orgId).then(setOrg)
-    api.getServices(orgId).then(setServices)
-    api.listPromotions(orgId).then(setPromotions)
+    chargerOrg()
+    api.getServices(orgId).then(setServices).catch(() => setServices([]))
+    api.listPromotions(orgId).then(setPromotions).catch(() => setPromotions([]))
     refreshTicket()
-  }, [orgId, refreshTicket])
+  }, [orgId, refreshTicket, chargerOrg])
 
   // Pas d'abonnement Realtime ici (vérifié en audit pré-production) : la table tickets
   // n'accorde volontairement aucun accès à anon (RLS, voir supabase/schema.sql — sans
@@ -202,6 +211,19 @@ export default function ClientPage() {
     if (ticket.documents_requis?.length > 0) slides.push({ id: '__documents__', type: 'documents' })
     return [...slides, ...promotions]
   }, [ticket, promotions])
+
+  if (orgError) {
+    return (
+      <div className="loading-screen">
+        <div className="center" style={{ maxWidth: 320, padding: 24 }}>
+          <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚠️</div>
+          <p style={{ fontWeight: 700, margin: '0 0 6px' }}>Impossible de charger cette page</p>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>Vérifiez votre connexion internet et réessayez.</p>
+          <Button onClick={chargerOrg}>Réessayer</Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!org) return <LoadingScreen />
 
@@ -335,7 +357,19 @@ export default function ClientPage() {
     <PageShell organisation={org} title={org.nom} subtitle="Prendre un ticket">
       <div className="stack">
         {services.map((s) => (
-          <Card key={s.id} className="row card-clickable" onClick={() => setSelectedService(s)}>
+          <Card
+            key={s.id}
+            className="row card-clickable"
+            role="button"
+            tabIndex={0}
+            onClick={() => setSelectedService(s)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setSelectedService(s)
+              }
+            }}
+          >
             <div className="row" style={{ justifyContent: 'flex-start', gap: 14 }}>
               <IconBadge icon={serviceIcon(s.nom)} />
               <div>

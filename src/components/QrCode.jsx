@@ -25,14 +25,14 @@ export default function QrCode({ url, size = 260, color = '#000000' }) {
 
   if (error) {
     return (
-      <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fee2e2', color: '#991b1b', fontSize: 13, textAlign: 'center', padding: 12 }}>
+      <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--danger-bg)', color: 'var(--danger-ink)', fontSize: 13, textAlign: 'center', padding: 12 }}>
         Erreur de génération du QR code
       </div>
     )
   }
 
   if (!dataUrl) {
-    return <div style={{ width: size, height: size, background: '#f1f1f4' }} />
+    return <div style={{ width: size, height: size, background: 'var(--surface-muted)' }} />
   }
 
   return <img src={dataUrl} width={size} height={size} alt="QR code" style={{ display: 'block' }} />

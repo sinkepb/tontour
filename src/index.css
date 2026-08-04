@@ -3,6 +3,7 @@
   --org-secondary: #62a0ff;
   --bg: #f5f7fc;
   --surface: #ffffff;
+  --surface-muted: #f1f1f4;
   --ink: #0d1b34;
   --text: #0d1b34;
   --text-muted: #5b6478;
@@ -10,8 +11,10 @@
   --border: #e3e8f5;
   --danger: #dc2626;
   --danger-bg: #fee2e2;
+  --danger-ink: #991b1b;
   --success: #16a34a;
   --success-bg: #dcfce7;
+  --success-ink: #166534;
   --warning-bg: #fef3c7;
   --warning-ink: #92400e;
 
@@ -106,6 +109,7 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 800; letter-spacing:
 
 .card-clickable { cursor: pointer; }
 .card-clickable:hover { box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--org-primary) 35%, var(--border)); }
+.card-clickable:focus-visible { outline: 2px solid var(--org-primary); outline-offset: 2px; }
 
 .grid { display: grid; gap: 12px; }
 .grid-2 { grid-template-columns: 1fr 1fr; }
@@ -178,10 +182,12 @@ label.field-label { font-size: 0.8rem; font-weight: 700; color: var(--text-muted
   font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em;
 }
 .badge-muted { background: #f1f1f5; color: var(--text-muted); }
-.badge-success { background: var(--success-bg); color: #166534; }
+.badge-success { background: var(--success-bg); color: var(--success-ink); }
 .badge-warning { background: var(--warning-bg); color: var(--warning-ink); }
-.badge-danger { background: var(--danger-bg); color: #991b1b; }
-.badge-primary { background: color-mix(in srgb, var(--org-primary) 14%, white); color: var(--org-primary); }
+.badge-danger { background: var(--danger-bg); color: var(--danger-ink); }
+/* Texte assombri (85% au lieu de 100% org-primary) pour rester ≥4.5:1 sur le fond
+   très clair — à 100% le contraste tombe à ~4.2:1, sous le seuil AA. */
+.badge-primary { background: color-mix(in srgb, var(--org-primary) 14%, white); color: color-mix(in srgb, var(--org-primary) 85%, black); }
 
 .avatar {
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -471,6 +477,17 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
 .story-org-name { font-weight: 700; font-size: 0.82rem; }
 .story-time { font-size: 0.75rem; opacity: 0.75; margin-left: 2px; }
 
+.story-pause-btn {
+  appearance: none; border: none; cursor: pointer;
+  margin-left: auto; flex-shrink: 0;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: white; font-size: 0.85rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.story-pause-btn:hover { background: rgba(255, 255, 255, 0.28); }
+.story-pause-btn:focus-visible { outline: 2px solid white; outline-offset: 2px; }
+
 .story-body {
   flex: 1;
   display: flex;
@@ -482,6 +499,21 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
   touch-action: pan-y;
   position: relative;
 }
+
+/* Équivalent clavier des zones de tap — discrets visuellement (la storie garde son
+   look "tap n'importe où") mais bien réels et focusables au clavier/lecteur d'écran. */
+.story-nav-btn {
+  appearance: none; border: none; cursor: pointer;
+  position: absolute; top: 0; bottom: 0;
+  width: 15%; min-width: 36px;
+  background: transparent; color: rgba(255, 255, 255, 0.55);
+  font-size: 1.6rem; display: flex; align-items: center;
+  opacity: 0; transition: opacity 0.15s ease, background 0.15s ease;
+}
+.story-nav-btn:hover, .story-nav-btn:focus-visible { opacity: 1; background: rgba(0, 0, 0, 0.12); }
+.story-nav-btn:focus-visible { outline: 2px solid white; outline-offset: -2px; }
+.story-nav-btn--prev { left: 0; justify-content: flex-start; padding-left: 6px; }
+.story-nav-btn--next { right: 0; justify-content: flex-end; padding-right: 6px; }
 
 .story-slide { text-align: center; width: 100%; }
 .story-slide-badge {
@@ -563,6 +595,10 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 0%, transparent); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
 /* ─── Landing page marketing ────────────────────────────────────────── */
 
 .site {
@@ -590,6 +626,17 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--org-prima
 .site-nav { display: flex; gap: 22px; margin-left: 12px; }
 .site-nav a { font-size: 0.88rem; font-weight: 600; color: var(--text-muted); text-decoration: none; transition: color 0.15s ease; }
 .site-nav a:hover { color: var(--text); }
+
+/* En dessous de ~760px, brand + 3 liens + 2 boutons dans une seule ligne flex non
+   pliable débordait ou s'écrasait. Les liens de navigation interne (ancres vers des
+   sections déjà présentes plus bas dans la page) sont masqués — le contenu reste
+   accessible en scrollant, seul le raccourci disparaît ; les CTA restent visibles
+   et se replient sur une seconde ligne. */
+@media (max-width: 760px) {
+  .site-header { flex-wrap: wrap; row-gap: 10px; }
+  .site-nav { display: none; }
+  .site-header .row { margin-left: 0 !important; width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+}
 
 .hero {
   position: relative; overflow: hidden;
@@ -785,12 +832,19 @@ section.site-section { padding: 64px 24px; }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d0f14; --surface: #171922; --ink: #f2f2f5; --text: #f2f2f5;
+    --bg: #0d0f14; --surface: #171922; --surface-muted: #23262f; --ink: #f2f2f5; --text: #f2f2f5;
     --text-muted: #9aa0ab; --border: #2a2d38;
     --danger-bg: #3a1a1a; --success-bg: #123321; --warning-bg: #3a2a10;
+    /* Les fonds passent en tons sombres ci-dessus, mais les couleurs de texte des
+       badges (--warning-ink et consorts) restaient calées pour un fond clair — sur
+       les nouveaux fonds sombres le contraste tombait à ~1.9:1. Éclaircies ici pour
+       rester ≥4.5:1 (AA) sur leurs fonds sombres respectifs. */
+    --danger-ink: #fca5a5; --success-ink: #86efac; --warning-ink: #fcd34d;
   }
   .input { background: #12141c; }
   .badge-muted { background: #23262f; color: var(--text-muted); }
-  .avatar { background: color-mix(in srgb, var(--org-primary) 28%, #171922); }
+  /* Même raison : le bleu de marque plein (--org-primary) sur le fond d'avatar
+     assombri tombait à ~2.6:1 ; on l'éclaircit en le mélangeant à du blanc. */
+  .avatar { background: color-mix(in srgb, var(--org-primary) 28%, #171922); color: color-mix(in srgb, var(--org-primary) 55%, white); }
   .stripe-demo-badge { background: color-mix(in srgb, #635bff 25%, #171922); color: #b3aeff; }
 }
