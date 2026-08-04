@@ -25,4 +25,15 @@ describe('toCsv', () => {
   it('tableau vide -> seulement l’en-tête', () => {
     expect(toCsv([], columns)).toBe('Code,Note')
   })
+
+  it('neutralise une valeur pouvant être interprétée comme une formule Excel', () => {
+    const csv = toCsv([{ code: 'V-01', note: '=HYPERLINK("http://evil.test")' }], columns)
+    expect(csv).toBe('Code,Note\r\nV-01,"\'=HYPERLINK(""http://evil.test"")"')
+  })
+
+  it('neutralise +, - et @ en tête de valeur', () => {
+    expect(toCsv([{ code: '+1', note: 0 }], columns)).toBe("Code,Note\r\n'+1,0")
+    expect(toCsv([{ code: '-1', note: 0 }], columns)).toBe("Code,Note\r\n'-1,0")
+    expect(toCsv([{ code: '@cmd', note: 0 }], columns)).toBe("Code,Note\r\n'@cmd,0")
+  })
 })

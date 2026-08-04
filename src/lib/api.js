@@ -176,9 +176,21 @@ export const api = {
   async inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur }) {
     if (isDemo) return demo.inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur })
 
+    let agentId
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password })
-    if (signUpError) throw new Error(signUpError.message)
-    const agentId = signUpData.user?.id
+    if (signUpError) {
+      // Cas le plus probable : une tentative d'inscription précédente a créé le compte
+      // Auth (signUp a réussi) mais s'est interrompue avant d'appeler
+      // inscrire_organisation (réseau coupé, onglet fermé...) — le compte existe mais
+      // n'a pas encore d'organisation. Plutôt qu'un échec sans recours ("email déjà
+      // utilisé"), on retente une connexion avec les identifiants tout juste saisis
+      // pour reprendre là où ça s'est arrêté, au lieu de laisser un compte orphelin.
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError || !signInData.user) throw new Error(signUpError.message)
+      agentId = signInData.user.id
+    } else {
+      agentId = signUpData.user?.id
+    }
     if (!agentId) throw new Error('Impossible de créer le compte')
 
     const { data, error } = await supabase.rpc('inscrire_organisation', {
@@ -191,7 +203,17 @@ export const api = {
       p_plan: plan,
       p_montant_mensuel_eur: montantMensuelEur ?? 0,
     })
-    if (error) throw new Error(error.message)
+    if (error) {
+      // Même logique de reprise : l'organisation a peut-être déjà été créée par une
+      // tentative précédente dont la réponse n'est jamais arrivée jusqu'ici (RPC
+      // réussie côté serveur, connexion coupée juste après) — on la retrouve plutôt
+      // que d'échouer une deuxième fois sur le même compte.
+      if (error.message.includes('déjà rattaché')) {
+        const { data: existing } = await supabase.from('agents').select('organisation_id').eq('id', agentId).single()
+        if (existing?.organisation_id) return { organisation_id: existing.organisation_id }
+      }
+      throw new Error(error.message)
+    }
     const row = Array.isArray(data) ? data[0] : data
     return { organisation_id: row.organisation_id }
   },

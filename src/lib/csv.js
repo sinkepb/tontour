@@ -1,8 +1,15 @@
 // Génération/téléchargement CSV côté client — aucune dépendance, aucun aller-retour
 // serveur : les données sont déjà chargées (résultat de recherche du back-office).
 
+// Un motif client (`tickets.motif`) est repris tel quel dans l'export : sans ce garde-fou,
+// une valeur commençant par =, +, - ou @ s'exécute comme une formule quand l'admin ouvre
+// le CSV dans Excel/Sheets (injection de formule CSV). On neutralise en préfixant d'une
+// apostrophe, convention standard qui force une lecture en texte brut.
+const FORMULA_TRIGGER = /^[=+\-@]/
+
 function csvEscape(value) {
-  const s = value == null ? '' : String(value)
+  const raw = value == null ? '' : String(value)
+  const s = FORMULA_TRIGGER.test(raw) ? `'${raw}` : raw
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 

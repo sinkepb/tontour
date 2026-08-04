@@ -318,11 +318,21 @@ export function servicesEnAlerte(organisationId) {
 // ─── Écritures ─────────────────────────────────────────────────────────
 
 export function creerTicket({ organisation_id, service_id, motif, telephone, canal = 'mobile', prioritaire = false }) {
+  // Relecture fraîche avant de calculer la séquence du jour : même rationale que
+  // appelerProchain/connecterPosteAuto, pour limiter (sans l'éliminer complètement — le
+  // mode démo est mono-utilisateur) le risque de deux onglets calculant le même numéro de
+  // ticket. Voir creer_ticket()/generer_code_ticket() en prod pour la garantie réelle
+  // (verrou consultatif transactionnel).
+  state = load()
   const service = state.services.find((s) => s.id === service_id && s.organisation_id === organisation_id && s.actif)
   if (!service) throw new Error('Service invalide ou inactif')
 
   const cree_le = new Date().toISOString()
   const ticketsServiceAujourdhui = state.tickets.filter((t) => t.service_id === service_id && todayKey(t.cree_le) === todayKey(cree_le)).length
+  // Garde-fou anti-spam basique, miroir du plafond appliqué côté RPC creer_ticket() en
+  // production (schema.sql) — évite que le mode démo divergent masque une régression de
+  // cette protection si elle est un jour retirée par erreur d'un seul côté.
+  if (ticketsServiceAujourdhui >= 500) throw new Error('Trop de tickets créés aujourd’hui pour ce service, réessayez plus tard')
   const ticket = {
     id: uid(),
     organisation_id,
@@ -567,6 +577,16 @@ export function listAvisRecents(organisationId, limit = 20) {
  * 1er poste + services par défaut + abonnement (démo Stripe pour l'instant),
  * miroir de la RPC inscrire_organisation() de schema.sql. */
 export function inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur }) {
+  // Miroir des mêmes garde-fous que inscrire_organisation() côté SQL (schema.sql) :
+  // sans eux, l'UI les valide déjà côté client, mais un appel direct (ou une
+  // régression future de cette validation côté formulaire) créerait une
+  // organisation invalide en mode démo sans que rien ne le détecte.
+  if (!['mairie', 'boutique'].includes(type)) {
+    throw new Error('Type d’organisation invalide')
+  }
+  if (!nom?.trim()) {
+    throw new Error('Le nom de l’organisation est requis')
+  }
   if (state.agents.some((a) => a.email === email)) {
     throw new Error('Un compte existe déjà avec cet email')
   }
