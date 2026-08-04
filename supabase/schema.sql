@@ -204,6 +204,15 @@ declare
 begin
   select prefixe_ticket into v_prefixe from services where id = new.service_id;
 
+  -- Verrou consultatif borné à la transaction courante (organisation + service + jour) :
+  -- sans lui, deux creer_ticket() concurrents pour le même service peuvent tous les deux
+  -- lire le même count(*) avant que l'un des deux ne valide, et produire deux tickets avec
+  -- le même code (déjà vu : appeler_prochain/connecter_poste_auto ont le même besoin de
+  -- sérialisation, traité là-bas par FOR UPDATE SKIP LOCKED). Le second appelant attend que
+  -- le premier valide (ou annule) avant de compter à son tour ; le verrou est libéré
+  -- automatiquement à la fin de la transaction de creer_ticket().
+  perform pg_advisory_xact_lock(hashtextextended(new.organisation_id::text || ':' || new.service_id::text || ':' || to_char(now(), 'YYYYMMDD'), 0));
+
   -- Bornes plutôt que cree_le::date = now()::date : sargable, utilise idx_tickets_org_jour
   -- (voir commentaire sur cet index plus haut).
   select count(*) + 1 into v_seq
@@ -626,6 +635,7 @@ language sql stable security definer set search_path = public as $$
     (select count(*)::int from postes where organisation_id = p_organisation_id and connecte)
   from tickets
   where organisation_id = p_organisation_id
+    and p_organisation_id = agent_organisation_id()
     and cree_le >= date_trunc('day', now())
     and cree_le < date_trunc('day', now()) + interval '1 day';
 $$;
@@ -642,6 +652,7 @@ language sql stable security definer set search_path = public as $$
        where t.organisation_id = p_organisation_id and t.statut = 'termine'
          and t.termine_le >= d and t.termine_le < d + interval '1 day')
   from generate_series(date_trunc('day', now()) - (greatest(p_jours, 1) - 1) * interval '1 day', date_trunc('day', now()), interval '1 day') as d
+  where p_organisation_id = agent_organisation_id()
   order by d;
 $$;
 
@@ -657,6 +668,7 @@ language sql stable security definer set search_path = public as $$
          and t.cree_le >= date_trunc('day', now()) - (greatest(p_jours, 1) - 1) * interval '1 day'
          and extract(hour from t.cree_le)::int = h)
   from generate_series(0, 23) as h
+  where p_organisation_id = agent_organisation_id()
   order by h;
 $$;
 
@@ -707,6 +719,7 @@ language sql stable security definer set search_path = public as $$
   join tickets t on t.service_id = s.id and t.statut = 'en_attente'
   join organisations o on o.id = s.organisation_id
   where s.organisation_id = p_organisation_id
+    and p_organisation_id = agent_organisation_id()
     and not exists (
       select 1 from postes p
       where p.organisation_id = s.organisation_id
@@ -725,6 +738,7 @@ language sql stable security definer set search_path = public as $$
   from services s
   left join tickets t on t.service_id = s.id and t.note is not null
   where s.organisation_id = p_organisation_id
+    and p_organisation_id = agent_organisation_id()
   group by s.id, s.nom
   order by s.nom;
 $$;
@@ -740,6 +754,7 @@ language sql stable security definer set search_path = public as $$
   from agents a
   left join tickets t on t.agent_id = a.id and t.note is not null
   where a.organisation_id = p_organisation_id
+    and p_organisation_id = agent_organisation_id()
   group by a.id, a.nom
   order by a.nom;
 $$;
