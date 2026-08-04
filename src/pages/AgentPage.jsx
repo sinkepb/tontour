@@ -15,6 +15,7 @@ export default function AgentPage() {
   const navigate = useNavigate()
 
   const [org, setOrg] = useState(null)
+  const [orgError, setOrgError] = useState(false)
   const [services, setServices] = useState([])
   const [poste, setPoste] = useState(null)
   const [connecting, setConnecting] = useState(true)
@@ -37,10 +38,15 @@ export default function AgentPage() {
     }
   }, [agent.id])
 
-  useEffect(() => {
-    api.getOrganisationAuth(orgId).then(setOrg)
-    api.getServices(orgId).then(setServices)
+  const chargerOrg = useCallback(() => {
+    setOrgError(false)
+    api.getOrganisationAuth(orgId).then(setOrg).catch(() => setOrgError(true))
   }, [orgId])
+
+  useEffect(() => {
+    chargerOrg()
+    api.getServices(orgId).then(setServices).catch(() => setServices([]))
+  }, [orgId, chargerOrg])
 
   useEffect(() => {
     connecter()
@@ -153,6 +159,19 @@ export default function AgentPage() {
     setPoste(null)
     await logout()
     navigate(`/o/${orgId}/connexion`)
+  }
+
+  if (orgError) {
+    return (
+      <div className="loading-screen">
+        <div className="center" style={{ maxWidth: 320, padding: 24 }}>
+          <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚠️</div>
+          <p style={{ fontWeight: 700, margin: '0 0 6px' }}>Impossible de charger cette page</p>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>Vérifiez votre connexion internet et réessayez.</p>
+          <Button onClick={chargerOrg}>Réessayer</Button>
+        </div>
+      </div>
+    )
   }
 
   if (!org) return <LoadingScreen />

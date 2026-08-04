@@ -27,7 +27,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api.getOrganisation(orgId).then(setOrg)
+    // Page non bloquée par `org` (PageShell et org?.nom/type gèrent déjà `org` null) :
+    // un échec dégrade juste le branding affiché, le formulaire reste utilisable —
+    // ce catch évite seulement une rejection de promesse non gérée.
+    api.getOrganisation(orgId).then(setOrg).catch(() => {})
   }, [orgId])
 
   async function onSubmit(e) {

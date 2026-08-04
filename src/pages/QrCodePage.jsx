@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import QrCode from '../components/QrCode.jsx'
@@ -12,10 +12,29 @@ import { Button, LoadingScreen } from '../components/ui.jsx'
 export default function QrCodePage() {
   const { orgId } = useParams()
   const [org, setOrg] = useState(null)
+  const [orgError, setOrgError] = useState(false)
+
+  const chargerOrg = useCallback(() => {
+    setOrgError(false)
+    api.getOrganisation(orgId).then(setOrg).catch(() => setOrgError(true))
+  }, [orgId])
 
   useEffect(() => {
-    api.getOrganisation(orgId).then(setOrg)
-  }, [orgId])
+    chargerOrg()
+  }, [chargerOrg])
+
+  if (orgError) {
+    return (
+      <div className="loading-screen">
+        <div className="center" style={{ maxWidth: 320, padding: 24 }}>
+          <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚠️</div>
+          <p style={{ fontWeight: 700, margin: '0 0 6px' }}>Impossible de charger cette page</p>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>Vérifiez votre connexion internet et réessayez.</p>
+          <Button onClick={chargerOrg}>Réessayer</Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!org) return <LoadingScreen />
 

@@ -8,10 +8,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.getSession().then((a) => {
-      setAgent(a)
-      setLoading(false)
-    })
+    // En cas d'échec (réseau, session invalide...), on traite comme "non connecté"
+    // plutôt que de laisser `loading` bloqué à `true` pour toujours : sans le catch,
+    // RequireAuth/RequireRole (App.jsx) rendent `null` indéfiniment tant que loading
+    // est vrai — un écran vide permanent au lieu d'une redirection vers la connexion.
+    api.getSession()
+      .then(setAgent)
+      .catch(() => setAgent(null))
+      .finally(() => setLoading(false))
   }, [])
 
   const login = useCallback(async (email, password) => {

@@ -1,22 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
-import { LoadingScreen, EmptyState } from '../components/ui.jsx'
+import { LoadingScreen, EmptyState, Button } from '../components/ui.jsx'
 
 export default function SalleAffichage() {
   const { orgId } = useParams()
   const [org, setOrg] = useState(null)
+  const [orgError, setOrgError] = useState(false)
   const [data, setData] = useState({ appeles: [], prochains: [] })
   const [now, setNow] = useState(new Date())
 
+  const chargerOrg = useCallback(() => {
+    setOrgError(false)
+    api.getOrganisation(orgId).then(setOrg).catch(() => setOrgError(true))
+  }, [orgId])
+
   const refresh = useCallback(async () => {
-    setData(await api.salleAffichage(orgId))
+    try {
+      setData(await api.salleAffichage(orgId))
+    } catch {
+      // Cet écran tourne en continu, sans surveillance humaine (affichage boutique) :
+      // une erreur ponctuelle ne doit pas figer l'affichage, le prochain poll (10s)
+      // réessaiera de lui-même.
+    }
   }, [orgId])
 
   useEffect(() => {
-    api.getOrganisation(orgId).then(setOrg)
+    chargerOrg()
     refresh()
-  }, [orgId, refresh])
+  }, [orgId, refresh, chargerOrg])
 
   // Pas d'abonnement Realtime ici : cet écran est public/anonyme (pas de RequireRole
   // sur cette route), et la table tickets n'accorde aucun accès à anon (RLS) — un
@@ -28,10 +40,32 @@ export default function SalleAffichage() {
     return () => clearInterval(poll)
   }, [refresh])
 
+  // Écran d'affichage boutique, sans surveillance humaine : si le premier chargement
+  // de l'organisation échoue, on retente tout seul plutôt que de compter sur
+  // quelqu'un pour cliquer "Réessayer" sur un écran que personne ne regarde.
+  useEffect(() => {
+    if (!orgError) return
+    const retry = setInterval(chargerOrg, 10000)
+    return () => clearInterval(retry)
+  }, [orgError, chargerOrg])
+
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(clock)
   }, [])
+
+  if (orgError) {
+    return (
+      <div className="loading-screen">
+        <div className="center" style={{ maxWidth: 320, padding: 24 }}>
+          <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚠️</div>
+          <p style={{ fontWeight: 700, margin: '0 0 6px' }}>Impossible de charger cet écran</p>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>Vérifiez la connexion internet et réessayez.</p>
+          <Button onClick={chargerOrg}>Réessayer</Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!org) return <LoadingScreen />
 
@@ -44,7 +78,7 @@ export default function SalleAffichage() {
         <div>
           <div className="topbar-title">{org.nom} — Écran de salle</div>
           <div className="topbar-sub row" style={{ justifyContent: 'flex-start', gap: 6 }}>
-            <span style={{ width: 7, height: 7, background: '#4ade80', animation: 'pulseDot 1.8s ease infinite' }} />
+            <span style={{ width: 7, height: 7, background: 'var(--success)', animation: 'pulseDot 1.8s ease infinite' }} />
             Mise à jour automatique
           </div>
         </div>
