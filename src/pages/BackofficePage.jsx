@@ -12,6 +12,7 @@ import PromotionsTab from './backoffice/PromotionsTab.jsx'
 import BrandingTab from './backoffice/BrandingTab.jsx'
 import QrCodeTab from './backoffice/QrCodeTab.jsx'
 import WidgetTab from './backoffice/WidgetTab.jsx'
+import EnseigneTab from './backoffice/EnseigneTab.jsx'
 
 const TABS = [
   ['Statistiques', '📊'],
@@ -20,6 +21,7 @@ const TABS = [
   ['Services', '🛎️'],
   ['Postes & agents', '🖥️'],
   ['Storie', '📣'],
+  ['Enseigne', '🏬'],
   ['Image de marque', '🎨'],
   ['QR Code', '📱'],
   ['Widget', '🧩'],
@@ -42,11 +44,12 @@ export default function BackofficePage() {
   const [avisRecents, setAvisRecents] = useState([])
   const [tendance, setTendance] = useState([])
   const [heures, setHeures] = useState([])
+  const [enseignes, setEnseignes] = useState([])
   const [loadError, setLoadError] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
-      const [o, s, p, ag, st, al, pr, ns, nv, avis, tend, heu] = await Promise.all([
+      const [o, s, p, ag, st, al, pr, ns, nv, avis, tend, heu, ens] = await Promise.all([
         api.getOrganisationAuth(orgId),
         api.getServices(orgId),
         api.listPostes(orgId),
@@ -59,6 +62,7 @@ export default function BackofficePage() {
         api.listAvisRecents(orgId),
         api.statsTendance(orgId, 14),
         api.statsHeures(orgId, 30),
+        api.listEnseignes(),
       ])
       setOrg(o)
       setServices(s)
@@ -72,6 +76,7 @@ export default function BackofficePage() {
       setAvisRecents(avis)
       setTendance(tend)
       setHeures(heu)
+      setEnseignes(ens)
       setLoadError(false)
     } catch {
       // Sans ce catch, un échec (réseau, RLS mal configurée...) laissait `org` à
@@ -142,6 +147,7 @@ export default function BackofficePage() {
       {tab === 'Services' && <ServicesTab orgId={orgId} services={services} onChange={refresh} />}
       {tab === 'Postes & agents' && <PostesAgentsTab postes={postes} agents={agents} services={services} onChange={refresh} />}
       {tab === 'Storie' && <PromotionsTab orgId={orgId} promotions={promotions} onChange={refresh} />}
+      {tab === 'Enseigne' && <EnseigneTab org={org} agents={agents} enseignes={enseignes} onChange={refresh} />}
       {tab === 'Image de marque' && <BrandingTab orgId={orgId} org={org} onChange={refresh} />}
       {tab === 'QR Code' && <QrCodeTab orgId={orgId} org={org} />}
       {tab === 'Widget' && <WidgetTab orgId={orgId} org={org} />}

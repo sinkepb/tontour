@@ -40,10 +40,12 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
     }
   }
 
-  async function remove(id) {
+  async function remove(promo) {
+    const ok = window.confirm(`Supprimer définitivement la storie « ${promo.titre} » ? Cette action est irréversible.`)
+    if (!ok) return
     setError('')
     try {
-      await api.supprimerPromotion(id)
+      await api.supprimerPromotion(promo.id)
       onChange()
     } catch (err) {
       setError(err.message)
@@ -87,7 +89,7 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
               <p className="muted" style={{ fontSize: '0.85rem' }}>Aucune storie disponible.</p>
             )}
             {disponibles.map((p) => (
-              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p.id)}>
+              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p)}>
                 <Button sm variant="outline" onClick={() => deplacer(p, true)} aria-label={`Afficher la storie « ${p.titre} » aux clients`}>
                   Afficher →
                 </Button>
@@ -103,7 +105,7 @@ export default function PromotionsTab({ orgId, promotions, onChange }) {
               <p className="muted" style={{ fontSize: '0.85rem' }}>Aucune storie affichée pour le moment — les clients ne verront aucune promo.</p>
             )}
             {affichees.map((p) => (
-              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p.id)}>
+              <StoryRow key={p.id} promo={p} onEdit={() => setEditing(p)} onRemove={() => remove(p)}>
                 <Button sm variant="outline" onClick={() => deplacer(p, false)} aria-label={`Masquer la storie « ${p.titre} »`}>
                   ← Masquer
                 </Button>

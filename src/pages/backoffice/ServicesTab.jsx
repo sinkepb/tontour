@@ -18,10 +18,14 @@ export default function ServicesTab({ orgId, services, onChange }) {
     }
   }
 
-  async function remove(id) {
+  async function remove(service) {
+    const ok = window.confirm(
+      `Désactiver le service « ${service.nom} » ? Il n’apparaîtra plus dans les listes et les nouveaux clients ne pourront plus le choisir.`
+    )
+    if (!ok) return
     setError('')
     try {
-      await api.supprimerService(id)
+      await api.supprimerService(service.id)
       onChange()
     } catch (err) {
       setError(err.message)
@@ -54,7 +58,7 @@ export default function ServicesTab({ orgId, services, onChange }) {
               <td className="muted" style={{ fontSize: '0.8rem' }}>{(s.documents_requis || []).join(', ') || '—'}</td>
               <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                 <Button sm variant="outline" onClick={() => setEditing(s)}>Modifier</Button>
-                <Button sm variant="danger" onClick={() => remove(s.id)}>Désactiver</Button>
+                <Button sm variant="danger" onClick={() => remove(s)}>Désactiver</Button>
               </td>
             </tr>
           ))}

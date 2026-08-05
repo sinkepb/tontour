@@ -15,9 +15,10 @@ create extension if not exists pgcrypto;
 -- ─── Tables ─────────────────────────────────────────────────────────────
 
 -- Regroupe plusieurs organisations (boutiques) sous une même enseigne, pour la vue
--- consolidée multi-boutiques du back-office. Rattacher une organisation/un agent à
--- une enseigne se fait en base pour cette première version (pas d'UI de gestion des
--- enseignes elles-mêmes — création/assignation par SQL, voir README).
+-- consolidée multi-boutiques du back-office. Créer une enseigne, y rattacher sa
+-- propre organisation et y donner accès à ses agents se fait en self-service depuis
+-- le back-office → onglet Enseigne. Renommer/supprimer une enseigne reste hors
+-- périmètre de ce MVP (en SQL si besoin).
 create table enseignes (
   id       uuid primary key default gen_random_uuid(),
   nom      text not null check (char_length(nom) between 1 and 200),
@@ -816,7 +817,23 @@ create policy organisations_admin_write on organisations for update
 -- ci-dessus ne sert à rien (Postgres refuse la requête avant même d'évaluer
 -- la RLS) et le back-office ne peut jamais enregistrer le branding
 -- (logo, couleurs) → "permission denied for table organisations".
-grant update (couleur_principale, couleur_secondaire, logo_url) on organisations to authenticated;
+-- enseigne_id inclus : rejoindre/quitter une enseigne (back-office → onglet
+-- Enseigne) passe par ce même update, borné par la policy ci-dessus à la PROPRE
+-- organisation de l'appelant — impossible de rattacher une organisation qui n'est
+-- pas la sienne, même en connaissant l'id d'une autre enseigne.
+grant update (couleur_principale, couleur_secondaire, logo_url, enseigne_id) on organisations to authenticated;
+
+-- enseignes : regroupent plusieurs organisations pour la vue consolidée multi-
+-- boutiques. Lecture ouverte (nom seul, rien de sensible) pour pouvoir chercher une
+-- enseigne existante à rejoindre ; création libre à tout admin (auto-service, comme
+-- inscrire_organisation — une enseigne vide ne donne accès à rien par elle-même) ;
+-- pas de policy update/delete : renommer/supprimer une enseigne reste hors périmètre
+-- de ce MVP (se fait en SQL si besoin, voir README).
+alter table enseignes enable row level security;
+revoke all on enseignes from anon, authenticated;
+create policy enseignes_authenticated_read on enseignes for select using (true);
+create policy enseignes_admin_insert on enseignes for insert with check (agent_role() = 'admin');
+grant select, insert on enseignes to authenticated;
 
 -- services : lecture publique (nécessaire pour le choix de service côté client).
 create policy services_public_read on services for select

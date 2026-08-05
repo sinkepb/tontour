@@ -246,6 +246,50 @@ export const api = {
     return data
   },
 
+  /** Nom seul, rien de sensible — lecture ouverte à tout agent connecté pour
+   * pouvoir chercher une enseigne existante à rejoindre. */
+  async listEnseignes() {
+    if (isDemo) return demo.listEnseignes()
+    const { data, error } = await supabase.from('enseignes').select('*').order('nom')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Auto-service, comme inscrireOrganisation : une enseigne vide (sans organisation
+   * rattachée) ne donne accès à rien — le risque est dans le rattachement lui-même
+   * (majEnseigneOrganisation ci-dessous, borné à sa propre organisation par RLS). */
+  async creerEnseigne(nom) {
+    if (isDemo) return demo.creerEnseigne(nom)
+    const { data, error } = await supabase.from('enseignes').insert({ nom }).select().single()
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Rattache (ou détache si enseigneId est null) l'organisation à une enseigne.
+   * RLS (organisations_admin_write) restreint déjà ceci à la PROPRE organisation de
+   * l'appelant — un admin ne peut jamais rattacher une organisation qui n'est pas
+   * la sienne, même en connaissant l'id d'une autre enseigne/organisation. */
+  async majEnseigneOrganisation(organisationId, enseigneId) {
+    if (isDemo) return demo.majEnseigneOrganisation(organisationId, enseigneId)
+    const { error } = await supabase.from('organisations').update({ enseigne_id: enseigneId }).eq('id', organisationId)
+    if (error) throw new Error(error.message)
+    if (!enseigneId) {
+      // Quitter l'enseigne retire aussi l'accès à la vue enseigne de tous les agents
+      // de l'organisation, pour ne pas laisser un accès orphelin à une enseigne quittée.
+      const { error: agentsError } = await supabase.from('agents').update({ enseigne_id: null }).eq('organisation_id', organisationId)
+      if (agentsError) throw new Error(agentsError.message)
+    }
+  },
+
+  /** Accorde/retire à un agent l'accès à la vue enseigne en lecture seule. RLS
+   * (agents_admin_write) restreint déjà ceci aux agents de la PROPRE organisation
+   * de l'appelant. */
+  async majAccesEnseigneAgent(agentId, enseigneId) {
+    if (isDemo) return demo.majAccesEnseigneAgent(agentId, enseigneId)
+    const { error } = await supabase.from('agents').update({ enseigne_id: enseigneId }).eq('id', agentId)
+    if (error) throw new Error(error.message)
+  },
+
   async getTicket(ticketId) {
     if (isDemo) return demo.getTicket(ticketId)
     const { data, error } = await supabase.from('tickets').select('*').eq('id', ticketId).single()

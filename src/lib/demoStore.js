@@ -91,6 +91,7 @@ function seed() {
     postes,
     tickets: [],
     abonnements: [],
+    enseignes: [],
   }
 }
 
@@ -101,6 +102,7 @@ function load() {
       const parsed = JSON.parse(raw)
       if (!parsed.promotions) parsed.promotions = defaultPromotions() // migration : anciennes sessions sans storie personnalisable
       if (!parsed.abonnements) parsed.abonnements = [] // migration : anciennes sessions sans onboarding self-service
+      if (!parsed.enseignes) parsed.enseignes = [] // migration : anciennes sessions sans gestion des enseignes
       // migration : anciennes sessions où le vendeur choisissait ses services lui-même
       // à la connexion — reprend ceux de son poste actuel s'il en a un, sinon vide.
       parsed.agents?.forEach((a) => {
@@ -150,6 +152,10 @@ export function getOrganisation(organisationId) {
 
 export function listOrganisations() {
   return state.organisations
+}
+
+export function listEnseignes() {
+  return state.enseignes.slice().sort((a, b) => a.nom.localeCompare(b.nom))
 }
 
 export function getServices(organisationId, { onlyActive = true } = {}) {
@@ -541,6 +547,43 @@ export function supprimerPromotion(promotionId) {
 export function majBranding(organisationId, { couleur_principale, couleur_secondaire, logo_url }) {
   const org = state.organisations.find((o) => o.id === organisationId)
   Object.assign(org, { couleur_principale, couleur_secondaire, logo_url })
+  persist()
+}
+
+/** Auto-service, comme inscrireOrganisation : une enseigne vide (sans organisation
+ * rattachée) ne donne accès à rien, le risque est dans le rattachement lui-même
+ * (majEnseigneOrganisation ci-dessous, borné à sa propre organisation). */
+export function creerEnseigne(nom) {
+  const propre = (nom || '').trim()
+  if (!propre) throw new Error('Le nom de l’enseigne est requis')
+  const enseigne = { id: uid(), nom: propre, cree_le: new Date().toISOString() }
+  state.enseignes.push(enseigne)
+  persist()
+  return enseigne
+}
+
+/** Rattache (ou détache si enseigneId est null) l'organisation à une enseigne.
+ * Toujours la PROPRE organisation de l'appelant côté RPC réelle (agent_organisation_id()
+ * dans schema.sql) — ici en démo il n'y a qu'un seul back-office ouvert à la fois donc
+ * pas de vérification supplémentaire nécessaire. */
+export function majEnseigneOrganisation(organisationId, enseigneId) {
+  const org = state.organisations.find((o) => o.id === organisationId)
+  if (!org) throw new Error('Organisation introuvable')
+  if (enseigneId && !state.enseignes.some((e) => e.id === enseigneId)) throw new Error('Enseigne introuvable')
+  org.enseigne_id = enseigneId
+  // Quitter l'enseigne retire aussi l'accès à la vue enseigne de tous les agents de
+  // l'organisation, pour ne pas laisser un accès orphelin à une enseigne quittée.
+  if (!enseigneId) {
+    state.agents.filter((a) => a.organisation_id === organisationId).forEach((a) => { a.enseigne_id = null })
+  }
+  persist()
+}
+
+/** Accorde/retire à un agent l'accès à la vue enseigne en lecture seule (agents.enseigne_id). */
+export function majAccesEnseigneAgent(agentId, enseigneId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+  agent.enseigne_id = enseigneId
   persist()
 }
 
