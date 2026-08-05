@@ -184,7 +184,7 @@ Audit réalisé sur ce dépôt avant un lancement réel :
 - **Séparer les projets Supabase Preview/Production** (déjà noté plus haut) — un seul projet `tontour` sert les deux pour l'instant.
 
 **Charge — non testé en conditions réelles, à faire avant un vrai lancement :**
-- Test de charge (k6/Artillery) avec plusieurs dizaines de tickets/appels simultanés — item déjà listé dans les critères d'acceptation ci-dessous, toujours ouvert.
+- Test de charge (k6) avec plusieurs dizaines de tickets simultanés — script prêt dans `loadtest/k6-ticket-flow.js` (parcours client anonyme : création + polling de statut), jamais exécuté contre un vrai projet Supabase. **Toujours utiliser une organisation jetable dédiée** — chaque exécution insère de vrais tickets en base. Voir l'en-tête du script pour l'usage.
 - Le polling client (4s, un par onglet ouvert) et l'écran de salle (10s) sont volontairement légers (une RPC ciblée, pas un `select *`), mais leur coût grandit linéairement avec le nombre de clients en attente simultanés — à surveiller si une organisation dépasse largement l'échelle "boutique/mairie unique" visée par ce MVP.
 
 ## Critères d'acceptation (§10) — état
