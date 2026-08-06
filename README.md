@@ -181,7 +181,7 @@ Audit réalisé sur ce dépôt avant un lancement réel :
 - **Longueur minimale des mots de passe** : le formulaire impose 8 caractères côté client, mais un appel direct à `supabase.auth.signUp` contournerait cette limite si le projet Supabase l'autorise. Dashboard → Authentication → Policies → régler la longueur minimale ≥ 8.
 - **Protection mots de passe compromis** (option "Leaked password protection" du dashboard Supabase) : à activer.
 - **CAPTCHA sur la création de ticket et l'inscription self-service** : `creer_ticket` et `inscrire_organisation` sont des routes anonymes appelables directement (hors UI), sans protection anti-bot au-delà du plafond quotidien ajouté ci-dessus. Une vraie protection nécessite un service tiers (Cloudflare Turnstile, hCaptcha) avec ses propres clés — non configuré dans ce dépôt, à mettre en place avant un lancement à fort trafic.
-- **Séparer les projets Supabase Preview/Production** (déjà noté plus haut) — un seul projet `tontour` sert les deux pour l'instant.
+- ~~**Séparer les projets Supabase Preview/Production**~~ — fait : le projet `tontour-preview` (même région, schéma identique via `supabase/schema.sql`) sert le développement local et les déploiements Preview Vercel ; `tontour` reste dédié à la production. Toute nouvelle évolution de `schema.sql` doit être rejouée sur les **deux** projets (SQL Editor Supabase, un projet à la fois).
 - **Monitoring des erreurs (Sentry)** : intégration prête (`@sentry/react`, `src/main.jsx`), désactivée tant que `VITE_SENTRY_DSN` n'est pas renseigné — aucun envoi nulle part par défaut. Créer un projet sur [sentry.io](https://sentry.io) (gratuit jusqu'à un certain volume), renseigner la variable dans Vercel → Settings → Environment Variables, puis redéployer.
 
 **Charge :**
