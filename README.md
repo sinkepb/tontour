@@ -183,8 +183,8 @@ Audit réalisé sur ce dépôt avant un lancement réel :
 - **CAPTCHA sur la création de ticket et l'inscription self-service** : `creer_ticket` et `inscrire_organisation` sont des routes anonymes appelables directement (hors UI), sans protection anti-bot au-delà du plafond quotidien ajouté ci-dessus. Une vraie protection nécessite un service tiers (Cloudflare Turnstile, hCaptcha) avec ses propres clés — non configuré dans ce dépôt, à mettre en place avant un lancement à fort trafic.
 - **Séparer les projets Supabase Preview/Production** (déjà noté plus haut) — un seul projet `tontour` sert les deux pour l'instant.
 
-**Charge — non testé en conditions réelles, à faire avant un vrai lancement :**
-- Test de charge (k6) avec plusieurs dizaines de tickets simultanés — script prêt dans `loadtest/k6-ticket-flow.js` (parcours client anonyme : création + polling de statut), jamais exécuté contre un vrai projet Supabase. **Toujours utiliser une organisation jetable dédiée** — chaque exécution insère de vrais tickets en base. Voir l'en-tête du script pour l'usage.
+**Charge :**
+- Test de charge (k6, `loadtest/k6-ticket-flow.js`) exécuté contre le projet Supabase de production, sur une organisation jetable dédiée (supprimée après coup) : montée progressive jusqu'à 40 clients simultanés, 804 requêtes (`creer_ticket` + `ticket_status`), **0% d'échec**, temps de réponse moyen 49ms (p95 78ms, max 616ms). Toujours utiliser une organisation jetable dédiée pour rejouer ce test — chaque exécution insère de vrais tickets en base. Voir l'en-tête du script pour l'usage.
 - Le polling client (4s, un par onglet ouvert) et l'écran de salle (10s) sont volontairement légers (une RPC ciblée, pas un `select *`), mais leur coût grandit linéairement avec le nombre de clients en attente simultanés — à surveiller si une organisation dépasse largement l'échelle "boutique/mairie unique" visée par ce MVP.
 
 ## Critères d'acceptation (§10) — état
@@ -195,5 +195,5 @@ Audit réalisé sur ce dépôt avant un lancement réel :
 - [x] Branding par organisation sans fuite entre organisations (testé manuellement avec 2 organisations en parallèle)
 - [x] Authentification agent/back-office avec séparation des rôles (`RequireRole` + RLS `agent_role()`)
 - [ ] Flux papier et SMS de secours bout en bout (non implémenté, voir roadmap)
-- [ ] Test de charge 50 tickets simultanés (à réaliser une fois un projet Supabase de dev créé — k6/Artillery)
+- [x] Test de charge tickets simultanés (k6, 40 clients simultanés, 804 requêtes, 0% d'échec — voir § Charge ci-dessus)
 - [x] Documentation de déploiement permettant à un tiers de déployer l'application (ce README)
