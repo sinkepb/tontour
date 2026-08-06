@@ -151,7 +151,13 @@ export default function MarketingLandingPage() {
         <p>
           TonTour — File d’attente dématérialisée · <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
         </p>
-        <p style={{ marginTop: 6, opacity: 0.7 }}>Projet en développement — tarifs et offres indicatifs.</p>
+        <p style={{ marginTop: 10, display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Link to="/mentions-legales" className="link-plain">Mentions légales</Link>
+          <Link to="/cgu" className="link-plain">CGU</Link>
+          <Link to="/cgv" className="link-plain">CGV</Link>
+          <Link to="/confidentialite" className="link-plain">Confidentialité</Link>
+        </p>
+        <p style={{ marginTop: 10, opacity: 0.7 }}>Projet en développement — tarifs et offres indicatifs.</p>
       </footer>
     </div>
   )

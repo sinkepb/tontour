@@ -162,18 +162,22 @@ create index idx_tickets_service_note on tickets (service_id) where note is not 
 create index idx_tickets_agent_note on tickets (agent_id) where note is not null;
 
 -- ─── RGPD : rétention courte du téléphone ──────────────────────────────────
--- À planifier via pg_cron (Supabase) : purge quotidienne des tickets terminés
--- depuis plus de 24h (téléphone + motif), conservation des seules métriques.
--- Note : le corps de la tâche cron.schedule() est lui-même délimité par des
--- guillemets dollar (dollar-quoting) — à écrire directement dans le SQL
--- Editor le jour de l'activation plutôt qu'ici en commentaire, pour éviter
--- toute confusion avec le dollar-quoting des fonctions plus bas dans ce fichier :
---
---   cron.schedule('purge-tickets-rgpd', '0 3 * * *',
---     'update tickets set telephone = null, motif = null
---      where statut in (''termine'', ''annule'')
---        and coalesce(termine_le, cree_le) < now() - interval ''24 hours''
---        and telephone is not null;');
+-- Purge quotidienne (3h du matin) des tickets terminés/annulés depuis plus de
+-- 24h : téléphone et motif effacés, conservation des seules métriques
+-- (statut, horodatages, note). cron.schedule() est idempotent par nom de job —
+-- rejouer ce bloc met juste à jour la même tâche plutôt que d'en créer une
+-- deuxième. Le corps de la tâche utilise un tag de dollar-quoting distinct
+-- ($sql$) pour ne pas entrer en conflit avec le $$ des fonctions plus bas.
+create extension if not exists pg_cron;
+
+select cron.schedule(
+  'purge-tickets-rgpd',
+  '0 3 * * *',
+  $sql$update tickets set telephone = null, motif = null
+    where statut in ('termine', 'annule')
+      and coalesce(termine_le, cree_le) < now() - interval '24 hours'
+      and telephone is not null;$sql$
+);
 
 -- ─── Fonctions utilitaires ──────────────────────────────────────────────
 

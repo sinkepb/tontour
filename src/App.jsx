@@ -18,6 +18,10 @@ const BackofficePage = lazy(() => import('./pages/BackofficePage.jsx'))
 const SalleAffichage = lazy(() => import('./pages/SalleAffichage.jsx'))
 const QrCodePage = lazy(() => import('./pages/QrCodePage.jsx'))
 const EnseignePage = lazy(() => import('./pages/EnseignePage.jsx'))
+const MentionsLegales = lazy(() => import('./pages/legal/MentionsLegales.jsx'))
+const CGU = lazy(() => import('./pages/legal/CGU.jsx'))
+const CGV = lazy(() => import('./pages/legal/CGV.jsx'))
+const Confidentialite = lazy(() => import('./pages/legal/Confidentialite.jsx'))
 
 function RequireRole({ role, children }) {
   const { agent, loading } = useAuth()
@@ -53,6 +57,10 @@ export default function App() {
             <Route path="/" element={<MarketingLandingPage />} />
             <Route path="/connexion" element={<StaffLoginPage />} />
             <Route path="/inscription" element={<OnboardingPage />} />
+            <Route path="/mentions-legales" element={<MentionsLegales />} />
+            <Route path="/cgu" element={<CGU />} />
+            <Route path="/cgv" element={<CGV />} />
+            <Route path="/confidentialite" element={<Confidentialite />} />
             <Route
               path="/enseigne"
               element={

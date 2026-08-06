@@ -141,6 +141,7 @@ Conformément à la consigne du cahier des charges, voici les écarts assumés p
 15. **Vue consolidée multi-boutiques (enseignes)** (`/enseigne`, `src/pages/EnseignePage.jsx`) : lecture seule, agrégée par organisation, protégée côté serveur par `agent_enseigne_id()` (RPC `stats_enseigne` renvoie un jeu de résultats vide si l'appelant n'a pas cette `enseigne_id`). Créer une enseigne, y rattacher sa propre organisation et y donner accès à ses agents se fait en self-service depuis le back-office → onglet Enseigne (`src/pages/backoffice/EnseigneTab.jsx`) — RLS borne chaque action à la PROPRE organisation/aux PROPRES agents de l'appelant (`organisations_admin_write`, `agents_admin_write`), impossible de rattacher une organisation qui n'est pas la sienne. Renommer/supprimer une enseigne existante reste hors périmètre de ce MVP (en SQL si besoin).
 16. **Design arrondi façon Calendly** : `--radius-sm/md/lg/pill` dans `index.css` (boutons pilule, cartes/badges/avatars arrondis), palette bleue (`--org-primary: #0a5eff`), police Plus Jakarta Sans pour les titres/CTA, formes décoratives ("blobs") floutées sur les moments hero. Remplace le design plat "zéro arrondi" des versions précédentes.
 17. **Attribution des services et des postes** : le vendeur ne choisit plus lui-même ses services ni son poste à la connexion. Les services sont attribués par l'admin, agent par agent, dans le back-office (onglet "Postes & agents" → `agents.service_ids`). Le premier poste libre est assigné automatiquement à la connexion via la RPC `connecter_poste_auto()` (`for update skip locked` pour éviter que deux vendeurs se voient attribuer le même poste en cas de connexion simultanée). `postes.service_ids` est une **copie** prise sur `agents.service_ids` au moment de la connexion : une modification faite par l'admin pendant qu'un vendeur est déjà connecté ne s'applique qu'à sa prochaine connexion, pas rétroactivement.
+18. **Purge RGPD automatique** : `pg_cron` planifie une purge quotidienne (3h du matin) qui efface `telephone`/`motif` sur les tickets terminés/annulés depuis plus de 24h — seules les métriques (statut, horodatages, note) sont conservées. Voir `supabase/schema.sql` § RGPD (`cron.schedule('purge-tickets-rgpd', ...)`).
 
 ## Ce qui n'est pas encore implémenté (roadmap)
 
@@ -148,7 +149,6 @@ Le cahier des charges liste 4 priorités (§8). Ce MVP couvre la **Priorité 1**
 
 - **Impression ticket papier** (agent d'accueil, ESC/POS) — nécessite du matériel physique pour être testé
 - **SMS de secours (Twilio/Vonage)** — la fonction Supabase Edge correspondante n'est pas encore écrite ; prévoir `supabase/functions/notify-sms/index.ts` déclenchée sur `appele_le` renseigné
-- **Purge RGPD automatique** — la requête est documentée en commentaire dans `supabase/schema.sql`, à planifier via `pg_cron` une fois le projet Supabase créé
 - **Multilingue** (reste de la Priorité 4) — l'export CSV lui-même est fait (voir écart n°13)
 - **Formulaire de contact réel sur la landing page** — actuellement `mailto:`, à remplacer par un formulaire + CRM lors de la mise à l'échelle commerciale
 
@@ -182,6 +182,7 @@ Audit réalisé sur ce dépôt avant un lancement réel :
 - **Protection mots de passe compromis** (option "Leaked password protection" du dashboard Supabase) : à activer.
 - **CAPTCHA sur la création de ticket et l'inscription self-service** : `creer_ticket` et `inscrire_organisation` sont des routes anonymes appelables directement (hors UI), sans protection anti-bot au-delà du plafond quotidien ajouté ci-dessus. Une vraie protection nécessite un service tiers (Cloudflare Turnstile, hCaptcha) avec ses propres clés — non configuré dans ce dépôt, à mettre en place avant un lancement à fort trafic.
 - **Séparer les projets Supabase Preview/Production** (déjà noté plus haut) — un seul projet `tontour` sert les deux pour l'instant.
+- **Monitoring des erreurs (Sentry)** : intégration prête (`@sentry/react`, `src/main.jsx`), désactivée tant que `VITE_SENTRY_DSN` n'est pas renseigné — aucun envoi nulle part par défaut. Créer un projet sur [sentry.io](https://sentry.io) (gratuit jusqu'à un certain volume), renseigner la variable dans Vercel → Settings → Environment Variables, puis redéployer.
 
 **Charge :**
 - Test de charge (k6, `loadtest/k6-ticket-flow.js`) exécuté contre le projet Supabase de production, sur une organisation jetable dédiée (supprimée après coup) : montée progressive jusqu'à 40 clients simultanés, 804 requêtes (`creer_ticket` + `ticket_status`), **0% d'échec**, temps de réponse moyen 49ms (p95 78ms, max 616ms). Toujours utiliser une organisation jetable dédiée pour rejouer ce test — chaque exécution insère de vrais tickets en base. Voir l'en-tête du script pour l'usage.
