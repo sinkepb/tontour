@@ -64,20 +64,15 @@ function seed() {
   const servicesBoutiqueIds = services.filter((s) => s.organisation_id === ORG_BOUTIQUE).map((s) => s.id)
   const servicesMairieIds = services.filter((s) => s.organisation_id === ORG_MAIRIE).map((s) => s.id)
 
-  // service_ids : attribués par l'admin (back-office → Postes & agents), pas choisis
-  // par le vendeur lui-même — préremplis ici pour que la démo soit utilisable
-  // immédiatement, sans étape de configuration manuelle.
+  // service_ids : attribués par l'admin (back-office → Agents), pas choisis par le
+  // vendeur lui-même — préremplis ici pour que la démo soit utilisable immédiatement,
+  // sans étape de configuration manuelle. connecte/en_pause/ticket_en_cours_id : état de
+  // connexion en direct, plus de notion de poste séparée (boutiques mobiles).
   const agents = [
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Camille Martin', email: 'vendeur@boutique.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte', service_ids: servicesBoutiqueIds },
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Sacha Dupont', email: 'admin@boutique.demo', password: 'admin123', role: 'admin', statut: 'deconnecte', service_ids: [] },
-    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Alex Petit', email: 'agent@mairie.demo', password: 'demo123', role: 'vendeur', statut: 'deconnecte', service_ids: servicesMairieIds },
-    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Morgan Roy', email: 'admin@mairie.demo', password: 'admin123', role: 'admin', statut: 'deconnecte', service_ids: [] },
-  ]
-
-  const postes = [
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Poste 1', agent_id: null, service_ids: [], ticket_en_cours_id: null, connecte: false, en_pause: false },
-    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Poste 2', agent_id: null, service_ids: [], ticket_en_cours_id: null, connecte: false, en_pause: false },
-    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Guichet 1', agent_id: null, service_ids: [], ticket_en_cours_id: null, connecte: false, en_pause: false },
+    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Camille Martin', email: 'vendeur@boutique.demo', password: 'demo123', role: 'vendeur', service_ids: servicesBoutiqueIds, connecte: false, en_pause: false, ticket_en_cours_id: null },
+    { id: uid(), organisation_id: ORG_BOUTIQUE, nom: 'Sacha Dupont', email: 'admin@boutique.demo', password: 'admin123', role: 'admin', service_ids: [], connecte: false, en_pause: false, ticket_en_cours_id: null },
+    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Alex Petit', email: 'agent@mairie.demo', password: 'demo123', role: 'vendeur', service_ids: servicesMairieIds, connecte: false, en_pause: false, ticket_en_cours_id: null },
+    { id: uid(), organisation_id: ORG_MAIRIE, nom: 'Morgan Roy', email: 'admin@mairie.demo', password: 'admin123', role: 'admin', service_ids: [], connecte: false, en_pause: false, ticket_en_cours_id: null },
   ]
 
   return {
@@ -88,7 +83,6 @@ function seed() {
     services,
     promotions: defaultPromotions(),
     agents,
-    postes,
     tickets: [],
     abonnements: [],
     enseignes: [],
@@ -103,13 +97,26 @@ function load() {
       if (!parsed.promotions) parsed.promotions = defaultPromotions() // migration : anciennes sessions sans storie personnalisable
       if (!parsed.abonnements) parsed.abonnements = [] // migration : anciennes sessions sans onboarding self-service
       if (!parsed.enseignes) parsed.enseignes = [] // migration : anciennes sessions sans gestion des enseignes
-      // migration : anciennes sessions où le vendeur choisissait ses services lui-même
-      // à la connexion — reprend ceux de son poste actuel s'il en a un, sinon vide.
+      // migration : anciennes sessions avec le modèle poste (avant fusion sur agents) —
+      // reprend l'état de connexion du poste de chaque agent puis abandonne postes,
+      // comme la migration SQL équivalente côté Postgres (supabase/schema.sql).
+      if (parsed.postes) {
+        parsed.agents?.forEach((a) => {
+          const poste = parsed.postes.find((p) => p.agent_id === a.id)
+          if (a.connecte === undefined) a.connecte = poste?.connecte ?? false
+          if (a.en_pause === undefined) a.en_pause = poste?.en_pause ?? false
+          if (a.ticket_en_cours_id === undefined) a.ticket_en_cours_id = poste?.ticket_en_cours_id ?? null
+          if (!a.service_ids) a.service_ids = poste?.service_ids ?? []
+        })
+        parsed.tickets?.forEach((t) => { delete t.poste_id })
+        delete parsed.postes
+      }
       parsed.agents?.forEach((a) => {
-        if (!a.service_ids) {
-          const posteActuel = parsed.postes?.find((p) => p.agent_id === a.id)
-          a.service_ids = posteActuel?.service_ids ?? []
-        }
+        if (a.connecte === undefined) a.connecte = false
+        if (a.en_pause === undefined) a.en_pause = false
+        if (a.ticket_en_cours_id === undefined) a.ticket_en_cours_id = null
+        if (!a.service_ids) a.service_ids = []
+        delete a.statut // colonne abandonnée, jamais lue
       })
       return parsed
     }
@@ -180,17 +187,13 @@ export function listAgents(organisationId) {
   return state.agents.filter((a) => a.organisation_id === organisationId)
 }
 
-export function listPostes(organisationId) {
-  return state.postes.filter((p) => p.organisation_id === organisationId)
-}
-
 export function ticketStatus(ticketId, clientToken) {
   const ticket = state.tickets.find((t) => t.id === ticketId && t.client_token === clientToken)
   if (!ticket) throw new Error('Ticket introuvable')
   const service = state.services.find((s) => s.id === ticket.service_id)
   const enAttenteDuService = state.tickets.filter((t) => t.service_id === ticket.service_id && t.statut === 'en_attente')
   const position = computePosition(ticket, enAttenteDuService)
-  const poste = state.postes.find((p) => p.id === ticket.poste_id)
+  const agent = state.agents.find((a) => a.id === ticket.agent_id)
   return {
     id: ticket.id,
     code: ticket.code,
@@ -198,7 +201,9 @@ export function ticketStatus(ticketId, clientToken) {
     statut: ticket.statut,
     position,
     attente_estimee_min: computeEtaMinutes(position, service?.temps_moyen_min ?? 5),
-    poste_nom: poste?.nom ?? null,
+    // Prénom seul : boutiques mobiles, pas de guichet fixe à désigner (miroir de
+    // agent_nom dans ticket_status/creer_ticket côté schema.sql).
+    agent_nom: agent ? agent.nom.split(' ')[0] : null,
     service_nom: service?.nom ?? null,
     documents_requis: service?.documents_requis ?? [],
     note: ticket.note ?? null,
@@ -221,7 +226,7 @@ export function salleAffichage(organisationId) {
   const appeles = state.tickets
     .filter((t) => t.organisation_id === organisationId && t.statut === 'en_cours')
     .sort((a, b) => (b.appele_le || '').localeCompare(a.appele_le || ''))
-    .map((t) => ({ code: t.code, poste: state.postes.find((p) => p.id === t.poste_id)?.nom ?? '' }))
+    .map((t) => ({ code: t.code, agent: state.agents.find((a) => a.id === t.agent_id)?.nom.split(' ')[0] ?? '' }))
 
   const prochains = state.tickets
     .filter((t) => t.organisation_id === organisationId && t.statut === 'en_attente')
@@ -244,7 +249,7 @@ export function statsJour(organisationId) {
     tickets_traites: termines.length,
     tickets_total: ticketsJour.length,
     attente_moyenne_min: Math.round(attenteMoy * 10) / 10,
-    postes_connectes: state.postes.filter((p) => p.organisation_id === organisationId && p.connecte).length,
+    agents_connectes: state.agents.filter((a) => a.organisation_id === organisationId && a.connecte).length,
   }
 }
 
@@ -295,7 +300,7 @@ export function statsEnseigne(enseigneId) {
         tickets_traites: termines.length,
         tickets_total: ticketsJour.length,
         attente_moyenne_min: Math.round(attenteMoy * 10) / 10,
-        postes_connectes: state.postes.filter((p) => p.organisation_id === o.id && p.connecte).length,
+        agents_connectes: state.agents.filter((a) => a.organisation_id === o.id && a.connecte).length,
       }
     })
     .sort((a, b) => a.organisation_nom.localeCompare(b.organisation_nom))
@@ -309,10 +314,10 @@ export function servicesEnAlerte(organisationId) {
     .map((s) => {
       const attente = state.tickets.filter((t) => t.service_id === s.id && t.statut === 'en_attente')
       if (attente.length === 0) return null
-      const posteActif = state.postes.some(
-        (p) => p.organisation_id === organisationId && p.connecte && !p.en_pause && p.service_ids.includes(s.id)
+      const agentActif = state.agents.some(
+        (a) => a.organisation_id === organisationId && a.connecte && !a.en_pause && a.service_ids.includes(s.id)
       )
-      if (posteActif) return null
+      if (agentActif) return null
       const plusAncien = Math.min(...attente.map((t) => new Date(t.cree_le).getTime()))
       const ancienneteMin = (now - plusAncien) / 60000
       if (ancienneteMin < delai) return null
@@ -325,7 +330,7 @@ export function servicesEnAlerte(organisationId) {
 
 export function creerTicket({ organisation_id, service_id, motif, telephone, canal = 'mobile', prioritaire = false }) {
   // Relecture fraîche avant de calculer la séquence du jour : même rationale que
-  // appelerProchain/connecterPosteAuto, pour limiter (sans l'éliminer complètement — le
+  // appelerProchain/activerAgent, pour limiter (sans l'éliminer complètement — le
   // mode démo est mono-utilisateur) le risque de deux onglets calculant le même numéro de
   // ticket. Voir creer_ticket()/generer_code_ticket() en prod pour la garantie réelle
   // (verrou consultatif transactionnel).
@@ -351,7 +356,6 @@ export function creerTicket({ organisation_id, service_id, motif, telephone, can
     prioritaire: !!prioritaire,
     commentaire: null,
     client_token: uid(),
-    poste_id: null,
     agent_id: null,
     cree_le,
     appele_le: null,
@@ -373,97 +377,80 @@ export function annulerTicket(ticketId, clientToken) {
 // Verrou optimiste : on relit l'état juste avant d'écrire pour limiter les
 // courses entre onglets (le mode démo est mono-utilisateur ; la vraie garantie
 // transactionnelle est assurée côté Postgres par appeler_prochain() en prod).
-export function appelerProchain(posteId) {
+export function appelerProchain(agentId) {
   state = load()
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste) throw new Error('Poste introuvable')
-  if (poste.ticket_en_cours_id) throw new Error('Un ticket est déjà en cours sur ce poste')
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+  if (agent.ticket_en_cours_id) throw new Error('Un ticket est déjà en cours')
 
   const servicesParPoids = new Map(state.services.map((s) => [s.id, s.poids]))
-  const ticketsEnAttente = state.tickets.filter((t) => t.organisation_id === poste.organisation_id && t.statut === 'en_attente')
-  const candidat = selectNextTicket(ticketsEnAttente, servicesParPoids, poste.service_ids)
+  const ticketsEnAttente = state.tickets.filter((t) => t.organisation_id === agent.organisation_id && t.statut === 'en_attente')
+  const candidat = selectNextTicket(ticketsEnAttente, servicesParPoids, agent.service_ids)
 
-  if (!candidat) throw new Error('Aucun ticket en attente pour les services de ce poste')
+  if (!candidat) throw new Error('Aucun ticket en attente pour vos services')
 
   candidat.statut = 'en_cours'
-  candidat.poste_id = posteId
-  // Figé au moment de l'appel, comme côté Postgres (voir commentaire sur
-  // appeler_prochain dans schema.sql) : poste.agent_id peut changer plus tard
-  // dans la journée, la note doit rester attribuée au bon vendeur.
-  candidat.agent_id = poste.agent_id
+  candidat.agent_id = agentId
   candidat.appele_le = new Date().toISOString()
-  poste.ticket_en_cours_id = candidat.id
+  agent.ticket_en_cours_id = candidat.id
   persist()
   return candidat
 }
 
-export function apercuProchain(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste || poste.ticket_en_cours_id) return null
+export function apercuProchain(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent || agent.ticket_en_cours_id) return null
   const servicesParPoids = new Map(state.services.map((s) => [s.id, s.poids]))
-  const ticketsEnAttente = state.tickets.filter((t) => t.organisation_id === poste.organisation_id && t.statut === 'en_attente')
-  return selectNextTicket(ticketsEnAttente, servicesParPoids, poste.service_ids)
+  const ticketsEnAttente = state.tickets.filter((t) => t.organisation_id === agent.organisation_id && t.statut === 'en_attente')
+  return selectNextTicket(ticketsEnAttente, servicesParPoids, agent.service_ids)
 }
 
-export function terminerTraitement(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
-  const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+export function terminerTraitement(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent || !agent.ticket_en_cours_id) throw new Error('Aucun ticket en cours')
+  const ticket = state.tickets.find((t) => t.id === agent.ticket_en_cours_id)
   ticket.statut = 'termine'
   ticket.termine_le = new Date().toISOString()
-  poste.ticket_en_cours_id = null
+  agent.ticket_en_cours_id = null
   persist()
 }
 
 /** Relance la notification sans réassigner le ticket : la sonnette reste active
  * après le premier appel pour rappeler un client qui n'a pas répondu. */
-export function rappelerClient(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
-  const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+export function rappelerClient(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent || !agent.ticket_en_cours_id) throw new Error('Aucun ticket en cours')
+  const ticket = state.tickets.find((t) => t.id === agent.ticket_en_cours_id)
   ticket.appele_le = new Date().toISOString()
   persist()
 }
 
 /** Statut 'absent' (distinct de 'termine') : le client n'était pas là au-delà du
  * délai de grâce de l'organisation. Vérifié côté serveur, pas seulement dans l'UI. */
-export function marquerAbsent(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste || !poste.ticket_en_cours_id) throw new Error('Aucun ticket en cours sur ce poste')
-  const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
-  const org = state.organisations.find((o) => o.id === poste.organisation_id)
+export function marquerAbsent(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent || !agent.ticket_en_cours_id) throw new Error('Aucun ticket en cours')
+  const ticket = state.tickets.find((t) => t.id === agent.ticket_en_cours_id)
+  const org = state.organisations.find((o) => o.id === agent.organisation_id)
   const delaiMs = (org?.delai_absence_min ?? 5) * 60000
   if (!ticket.appele_le || Date.now() - new Date(ticket.appele_le).getTime() < delaiMs) {
     throw new Error('Délai de grâce non écoulé avant de marquer ce client absent')
   }
   ticket.statut = 'absent'
   ticket.termine_le = new Date().toISOString()
-  poste.ticket_en_cours_id = null
+  agent.ticket_en_cours_id = null
   persist()
 }
 
-/** Le vendeur ne choisit plus ni poste ni services : miroir de connecter_poste_auto()
- * (schema.sql) — réutilise le poste déjà connecté de l'agent s'il y en a un, sinon
- * assigne le premier poste libre avec les services attribués par l'admin. */
-export function connecterPosteAuto(agentId) {
+/** Simple bascule d'état, miroir de activer_agent() (schema.sql) : plus de pool de
+ * postes à s'attribuer, l'agent est son unique unité de travail. */
+export function activerAgent(agentId) {
   const agent = state.agents.find((a) => a.id === agentId)
   if (!agent) throw new Error('Agent introuvable')
-
-  const dejaConnecte = state.postes.find((p) => p.organisation_id === agent.organisation_id && p.agent_id === agentId && p.connecte)
-  if (dejaConnecte) return dejaConnecte
-
-  state = load()
-  const libre = state.postes
-    .filter((p) => p.organisation_id === agent.organisation_id && !p.connecte)
-    .sort((a, b) => a.nom.localeCompare(b.nom))[0]
-  if (!libre) throw new Error('Aucun poste disponible actuellement')
-
-  libre.agent_id = agentId
-  libre.service_ids = agent.service_ids ?? []
-  libre.connecte = true
-  libre.en_pause = false
+  agent.connecte = true
+  agent.en_pause = false
   persist()
-  return libre
+  return agent
 }
 
 export function majServicesAgent(agentId, serviceIds) {
@@ -473,43 +460,39 @@ export function majServicesAgent(agentId, serviceIds) {
   persist()
 }
 
-export function togglePause(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  poste.en_pause = !poste.en_pause
+export function basculerPause(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+  agent.en_pause = !agent.en_pause
   persist()
-  return poste.en_pause
+  return agent.en_pause
 }
 
-export function deconnecterPoste(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  poste.connecte = false
-  poste.en_pause = false
-  poste.agent_id = null
-  poste.service_ids = []
-  persist()
-}
-
-/** Miroir de deconnecter_poste_admin() : contrairement à deconnecterPoste (le
- * vendeur se déconnecte lui-même), remet aussi le ticket en cours en file
- * d'attente s'il y en a un, au lieu de le laisser orphelin sur un poste libéré. */
-export function deconnecterPosteAdmin(posteId) {
-  const poste = state.postes.find((p) => p.id === posteId)
-  if (!poste) throw new Error('Poste introuvable')
-  if (poste.ticket_en_cours_id) {
-    const ticket = state.tickets.find((t) => t.id === poste.ticket_en_cours_id)
+/** Contrairement à l'ancien modèle poste (interchangeable), un agent est une identité
+ * fixe : se déconnecter avec un ticket en cours le remet en file d'attente plutôt que
+ * de bloquer définitivement la prochaine connexion de cet agent sur "ticket déjà en
+ * cours" — miroir de deconnecter_agent() (schema.sql). */
+export function deconnecterAgent(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId)
+  if (!agent) throw new Error('Agent introuvable')
+  if (agent.ticket_en_cours_id) {
+    const ticket = state.tickets.find((t) => t.id === agent.ticket_en_cours_id)
     if (ticket) {
       ticket.statut = 'en_attente'
-      ticket.poste_id = null
       ticket.agent_id = null
       ticket.appele_le = null
     }
   }
-  poste.connecte = false
-  poste.en_pause = false
-  poste.agent_id = null
-  poste.service_ids = []
-  poste.ticket_en_cours_id = null
+  agent.connecte = false
+  agent.en_pause = false
+  agent.ticket_en_cours_id = null
   persist()
+}
+
+/** Déconnexion forcée par l'admin (back-office) : même effet que deconnecterAgent —
+ * fonction séparée pour miroir explicite avec deconnecter_agent_admin() (schema.sql). */
+export function deconnecterAgentAdmin(agentId) {
+  deconnecterAgent(agentId)
 }
 
 export function upsertService(service) {
@@ -640,8 +623,8 @@ export function listAvisRecents(organisationId, limit = 20) {
 }
 
 /** Inscription self-service (onboarding) : crée organisation + agent admin +
- * 1er poste + services par défaut + abonnement (démo Stripe pour l'instant),
- * miroir de la RPC inscrire_organisation() de schema.sql. */
+ * services par défaut + abonnement (démo Stripe pour l'instant), miroir de la
+ * RPC inscrire_organisation() de schema.sql. */
 export function inscrireOrganisation({ nom, type, adresse, agentNom, email, password, plan, montantMensuelEur }) {
   // Miroir des mêmes garde-fous que inscrire_organisation() côté SQL (schema.sql) :
   // sans eux, l'UI les valide déjà côté client, mais un appel direct (ou une
@@ -671,9 +654,7 @@ export function inscrireOrganisation({ nom, type, adresse, agentNom, email, pass
     cree_le: now,
   })
 
-  state.agents.push({ id: uid(), organisation_id: organisationId, nom: agentNom, email, password, role: 'admin', statut: 'actif' })
-
-  state.postes.push({ id: uid(), organisation_id: organisationId, nom: 'Poste 1', agent_id: null, service_ids: [], ticket_en_cours_id: null, connecte: false, en_pause: false })
+  state.agents.push({ id: uid(), organisation_id: organisationId, nom: agentNom, email, password, role: 'admin', service_ids: [], connecte: false, en_pause: false, ticket_en_cours_id: null })
 
   const defaultServices = type === 'boutique'
     ? [{ prefixe_ticket: 'V', nom: 'Ventes', temps_moyen_min: 6, poids: 1 }, { prefixe_ticket: 'S', nom: 'SAV', temps_moyen_min: 10, poids: 2 }]

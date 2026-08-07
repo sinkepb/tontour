@@ -21,15 +21,15 @@ export const SEGMENTS = {
       ['🔔', 'Notification en temps réel', 'Vibration et notification web dès que le vendeur appelle le client — en moins de 2 secondes.'],
       ['📣', 'Storie personnalisée', 'Diffusez vos offres et promotions pendant l’attente, gérées en quelques clics depuis le back-office.'],
       ['🎨', 'Image de marque de la boutique', 'Couleurs et logo appliqués automatiquement sur les 4 interfaces, sans rien configurer côté client.'],
-      ['📊', 'Statistiques du jour', 'Tickets traités, temps d’attente moyen, postes connectés — en direct depuis le back-office.'],
-      ['🧑‍🤝‍🧑', 'Un vendeur, plusieurs files', 'L’admin attribue les services à chaque vendeur ; à la connexion, il est assigné automatiquement au premier poste libre — zéro configuration côté comptoir.'],
+      ['📊', 'Statistiques du jour', 'Tickets traités, temps d’attente moyen, vendeurs connectés — en direct depuis le back-office.'],
+      ['🧑‍🤝‍🧑', 'Un vendeur, plusieurs files', 'L’admin attribue les services à chaque vendeur ; il voit directement sa file d’attente dès sa connexion — zéro configuration côté comptoir.'],
     ],
     plans: [
       {
-        key: 'starter', name: 'Starter', price: 'Gratuit', priceEur: 0, period: '', desc: '1 poste, pour tester en boutique',
+        key: 'starter', name: 'Starter', price: 'Gratuit', priceEur: 0, period: '', desc: '1 vendeur, pour tester en boutique',
         features: [
           ['QR code de la boutique', true],
-          ['1 poste vendeur', true],
+          ['1 vendeur', true],
           ['Jusqu’à 3 services', true],
           ['Storie personnalisable', true],
           ['Écran de salle', true],
@@ -37,10 +37,10 @@ export const SEGMENTS = {
         cta: 'Essayer gratuitement',
       },
       {
-        key: 'pro', name: 'Pro', price: '49€', priceEur: 49, period: '/mois', desc: 'Jusqu’à 5 postes, file pondérée', highlight: true,
+        key: 'pro', name: 'Pro', price: '49€', priceEur: 49, period: '/mois', desc: 'Jusqu’à 5 vendeurs, file pondérée', highlight: true,
         features: [
           ['Tout Starter', true],
-          ['Jusqu’à 5 postes vendeur', true],
+          ['Jusqu’à 5 vendeurs', true],
           ['File pondérée & motifs structurés', true],
           ['Back-office complet + alertes', true],
           ['Branding personnalisé', true],
@@ -52,7 +52,7 @@ export const SEGMENTS = {
         key: 'enseigne', name: 'Enseigne', price: 'Sur devis', priceEur: null, period: '', desc: 'Plusieurs boutiques, même enseigne',
         features: [
           ['Tout Pro', true],
-          ['Postes illimités', true],
+          ['Vendeurs illimités', true],
           ['Vue consolidée multi-boutiques', false],
           ['Tableau de bord ROI', false],
           ['Accompagnement dédié', true],
@@ -76,15 +76,15 @@ export const SEGMENTS = {
       ['🔔', 'Notification en temps réel', 'L’administré peut sortir de la mairie ou s’asseoir dehors : il est prévenu quand c’est son tour.'],
       ['📣', 'Messages & infos pratiques', 'Diffusez horaires, consignes ou informations utiles pendant l’attente, gérés depuis le back-office.'],
       ['🖥️', 'Écran de salle public', 'Affichage des tickets appelés en salle d’attente — utile même sans smartphone.'],
-      ['⚠️', 'Alerte guichet sans agent', 'Le back-office prévient si un service reste sans agent connecté au-delà d’un délai paramétrable.'],
+      ['⚠️', 'Alerte service sans agent', 'Le back-office prévient si un service reste sans agent connecté au-delà d’un délai paramétrable.'],
       ['♿', 'Accessibilité renforcée', 'Contraste élevé, compatibilité lecteurs d’écran, interface multilingue.'],
     ],
     plans: [
       {
-        key: 'commune', name: 'Commune', price: 'Gratuit', priceEur: 0, period: '', desc: '1 guichet, jusqu’à 2 démarches',
+        key: 'commune', name: 'Commune', price: 'Gratuit', priceEur: 0, period: '', desc: '1 agent, jusqu’à 2 démarches',
         features: [
           ['QR code de l’accueil', true],
-          ['1 poste agent', true],
+          ['1 agent', true],
           ['Jusqu’à 2 services', true],
           ['Messages personnalisables', true],
           ['Écran de salle', true],
@@ -95,7 +95,7 @@ export const SEGMENTS = {
         key: 'intercommunalite', name: 'Intercommunalité', price: '39€', priceEur: 39, period: '/mois', desc: 'Plusieurs guichets, plusieurs démarches', highlight: true,
         features: [
           ['Tout Commune', true],
-          ['Postes illimités', true],
+          ['Agents illimités', true],
           ['Alertes back-office', true],
           ['Statistiques de fréquentation', true],
           ['Image de marque personnalisée', true],

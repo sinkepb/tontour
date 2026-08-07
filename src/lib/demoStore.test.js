@@ -39,10 +39,10 @@ describe('marquerAbsent — délai de grâce', () => {
     vi.setSystemTime(new Date('2024-01-01T10:00:00.000Z'))
     const { org, service, vendeur } = boutique()
     const { id: ticketId, client_token } = demo.creerTicket({ organisation_id: org.id, service_id: service.id })
-    const poste = demo.connecterPosteAuto(vendeur.id)
-    demo.appelerProchain(poste.id) // appele_le = 10:00:00
+    demo.activerAgent(vendeur.id)
+    demo.appelerProchain(vendeur.id) // appele_le = 10:00:00
 
-    expect(() => demo.marquerAbsent(poste.id)).toThrow('Délai de grâce')
+    expect(() => demo.marquerAbsent(vendeur.id)).toThrow('Délai de grâce')
     expect(demo.ticketStatus(ticketId, client_token).statut).toBe('en_cours')
   })
 
@@ -51,42 +51,54 @@ describe('marquerAbsent — délai de grâce', () => {
     vi.setSystemTime(new Date('2024-01-01T10:00:00.000Z'))
     const { org, service, vendeur } = boutique()
     const { id: ticketId, client_token } = demo.creerTicket({ organisation_id: org.id, service_id: service.id })
-    const poste = demo.connecterPosteAuto(vendeur.id)
-    demo.appelerProchain(poste.id)
+    demo.activerAgent(vendeur.id)
+    demo.appelerProchain(vendeur.id)
 
     vi.setSystemTime(new Date('2024-01-01T10:05:01.000Z')) // 5min 1s plus tard
-    expect(() => demo.marquerAbsent(poste.id)).not.toThrow()
+    expect(() => demo.marquerAbsent(vendeur.id)).not.toThrow()
     expect(demo.ticketStatus(ticketId, client_token).statut).toBe('absent')
   })
 })
 
-describe('connecterPosteAuto', () => {
-  it('réutilise le poste déjà connecté au lieu d’en assigner un nouveau', () => {
+describe('activerAgent', () => {
+  it('active l’agent et le marque disponible (pas en pause)', () => {
     const { vendeur } = boutique()
-    const premier = demo.connecterPosteAuto(vendeur.id)
-    const second = demo.connecterPosteAuto(vendeur.id)
-    expect(second.id).toBe(premier.id)
+    const moi = demo.activerAgent(vendeur.id)
+    expect(moi.connecte).toBe(true)
+    expect(moi.en_pause).toBe(false)
   })
 
-  it('assigne le poste libre, et refuse quand plus aucun n’est libre', () => {
-    const org = demo.listOrganisations().find((o) => o.type === 'mairie') // 1 seul poste ("Guichet 1")
-    const [agent1, agent2] = demo.listAgents(org.id)
-    expect(agent1).toBeTruthy()
-    expect(agent2).toBeTruthy()
-
-    const poste = demo.connecterPosteAuto(agent1.id)
-    expect(poste.nom).toBe('Guichet 1')
-
-    expect(() => demo.connecterPosteAuto(agent2.id)).toThrow('Aucun poste disponible')
-  })
-
-  it('deux vendeurs de la même boutique reçoivent des postes différents', () => {
+  it('deux vendeurs de la même boutique peuvent être actifs simultanément, chacun avec son propre ticket', () => {
     const org = demo.listOrganisations().find((o) => o.type === 'boutique')
-    const [agent1, agent2] = demo.listAgents(org.id) // 2 postes ("Poste 1", "Poste 2")
-    const poste1 = demo.connecterPosteAuto(agent1.id)
-    const poste2 = demo.connecterPosteAuto(agent2.id)
-    expect(poste1.id).not.toBe(poste2.id)
-    expect([poste1.nom, poste2.nom].sort()).toEqual(['Poste 1', 'Poste 2'])
+    const service = demo.getServices(org.id)[0]
+    const [agent1, agent2] = demo.listAgents(org.id)
+    demo.majServicesAgent(agent2.id, agent1.service_ids)
+    demo.activerAgent(agent1.id)
+    demo.activerAgent(agent2.id)
+    demo.creerTicket({ organisation_id: org.id, service_id: service.id })
+    demo.creerTicket({ organisation_id: org.id, service_id: service.id })
+
+    const t1 = demo.appelerProchain(agent1.id)
+    const t2 = demo.appelerProchain(agent2.id)
+    expect(t1.id).not.toBe(t2.id)
+  })
+})
+
+describe('deconnecterAgent', () => {
+  // Contrairement à l'ancien modèle poste (interchangeable), un agent est une identité
+  // fixe : sans cette remise en file, sa prochaine connexion resterait bloquée sur
+  // "ticket déjà en cours" pour un ticket qu'il a pourtant abandonné.
+  it('remet en file d’attente le ticket en cours si le vendeur se déconnecte en plein traitement', () => {
+    const { org, service, vendeur } = boutique()
+    const { id: ticketId, client_token } = demo.creerTicket({ organisation_id: org.id, service_id: service.id })
+    demo.activerAgent(vendeur.id)
+    demo.appelerProchain(vendeur.id)
+    expect(demo.ticketStatus(ticketId, client_token).statut).toBe('en_cours')
+
+    demo.deconnecterAgent(vendeur.id)
+
+    expect(demo.ticketStatus(ticketId, client_token).statut).toBe('en_attente')
+    expect(() => demo.appelerProchain(vendeur.id)).not.toThrow() // l'agent n'est plus bloqué
   })
 })
 

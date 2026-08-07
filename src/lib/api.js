@@ -100,31 +100,33 @@ export const api = {
     if (error) throw new Error(error.message)
   },
 
-  async apercuProchain(posteId) {
-    if (isDemo) return demo.apercuProchain(posteId)
-    return unwrapRpc(supabase.rpc('apercu_prochain', { p_poste_id: posteId })).catch(() => null)
+  /** `agentId` n'est utilisé qu'en mode démo (demoStore n'a pas de notion de session) —
+   * en mode Supabase, la RPC identifie l'agent via auth.uid(), pas besoin de le lui repasser. */
+  async apercuProchain(agentId) {
+    if (isDemo) return demo.apercuProchain(agentId)
+    return unwrapRpc(supabase.rpc('apercu_prochain')).catch(() => null)
   },
 
-  async appelerProchain(posteId) {
-    if (isDemo) return demo.appelerProchain(posteId)
-    return unwrapRpc(supabase.rpc('appeler_prochain', { p_poste_id: posteId }))
+  async appelerProchain(agentId) {
+    if (isDemo) return demo.appelerProchain(agentId)
+    return unwrapRpc(supabase.rpc('appeler_prochain'))
   },
 
-  async terminerTraitement(posteId) {
-    if (isDemo) return demo.terminerTraitement(posteId)
-    const { error } = await supabase.rpc('terminer_traitement', { p_poste_id: posteId })
+  async terminerTraitement(agentId) {
+    if (isDemo) return demo.terminerTraitement(agentId)
+    const { error } = await supabase.rpc('terminer_traitement')
     if (error) throw new Error(error.message)
   },
 
-  async rappelerClient(posteId) {
-    if (isDemo) return demo.rappelerClient(posteId)
-    const { error } = await supabase.rpc('rappeler_client', { p_poste_id: posteId })
+  async rappelerClient(agentId) {
+    if (isDemo) return demo.rappelerClient(agentId)
+    const { error } = await supabase.rpc('rappeler_client')
     if (error) throw new Error(error.message)
   },
 
-  async marquerAbsent(posteId) {
-    if (isDemo) return demo.marquerAbsent(posteId)
-    const { error } = await supabase.rpc('marquer_absent', { p_poste_id: posteId })
+  async marquerAbsent(agentId) {
+    if (isDemo) return demo.marquerAbsent(agentId)
+    const { error } = await supabase.rpc('marquer_absent')
     if (error) throw new Error(error.message)
   },
 
@@ -168,7 +170,7 @@ export const api = {
   },
 
   /** Inscription self-service (onboarding depuis la landing page). En mode Supabase :
-   * crée d'abord le compte auth (signUp), puis provisionne organisation/agent/postes/
+   * crée d'abord le compte auth (signUp), puis provisionne organisation/agent/
    * services/abonnement via la RPC SECURITY DEFINER inscrire_organisation — voir le
    * commentaire sur cette fonction dans schema.sql pour pourquoi p_agent_id est passé
    * explicitement plutôt que de compter sur auth.uid() (session pas toujours active
@@ -297,13 +299,6 @@ export const api = {
     return data
   },
 
-  async listPostes(organisationId) {
-    if (isDemo) return demo.listPostes(organisationId)
-    const { data, error } = await supabase.from('postes').select('*').eq('organisation_id', organisationId)
-    if (error) throw new Error(error.message)
-    return data
-  },
-
   async listAgents(organisationId) {
     if (isDemo) return demo.listAgents(organisationId)
     const { data, error } = await supabase.from('agents').select('*').eq('organisation_id', organisationId)
@@ -311,42 +306,38 @@ export const api = {
     return data
   },
 
-  /** Le vendeur ne choisit plus ni poste ni services : le premier poste libre lui est
-   * assigné automatiquement, avec les services que l'admin lui a attribués (voir
-   * majServicesAgent). `agentId` n'est utilisé qu'en mode démo — en mode Supabase, la
-   * RPC identifie l'agent via auth.uid(), pas besoin de le lui repasser. */
-  async connecterPosteAuto(agentId) {
-    if (isDemo) return demo.connecterPosteAuto(agentId)
-    return unwrapRpc(supabase.rpc('connecter_poste_auto'))
+  /** Simple bascule d'état : plus de pool de postes à s'attribuer, l'agent est son
+   * unique unité de travail. `agentId` n'est utilisé qu'en mode démo. */
+  async activerAgent(agentId) {
+    if (isDemo) return demo.activerAgent(agentId)
+    return unwrapRpc(supabase.rpc('activer_agent'))
   },
 
   /** Services qu'un agent est habilité à servir — attribués par l'admin (back-office
-   * → Postes & agents), pas choisis par le vendeur lui-même. */
+   * → Agents), pas choisis par le vendeur lui-même. */
   async majServicesAgent(agentId, serviceIds) {
     if (isDemo) return demo.majServicesAgent(agentId, serviceIds)
     const { error } = await supabase.from('agents').update({ service_ids: serviceIds }).eq('id', agentId)
     if (error) throw new Error(error.message)
   },
 
-  async togglePause(posteId, current) {
-    if (isDemo) return demo.togglePause(posteId)
-    const { error } = await supabase.from('postes').update({ en_pause: !current }).eq('id', posteId)
-    if (error) throw new Error(error.message)
-    return !current
+  async basculerPause(agentId) {
+    if (isDemo) return demo.basculerPause(agentId)
+    return unwrapRpc(supabase.rpc('basculer_pause'))
   },
 
-  async deconnecterPoste(posteId) {
-    if (isDemo) return demo.deconnecterPoste(posteId)
-    const { error } = await supabase.from('postes').update({ connecte: false, en_pause: false, agent_id: null, service_ids: [] }).eq('id', posteId)
+  async deconnecterAgent(agentId) {
+    if (isDemo) return demo.deconnecterAgent(agentId)
+    const { error } = await supabase.rpc('deconnecter_agent')
     if (error) throw new Error(error.message)
   },
 
-  /** Déconnexion forcée par l'admin (back-office) : contrairement à deconnecterPoste
+  /** Déconnexion forcée par l'admin (back-office) : contrairement à deconnecterAgent
    * (le vendeur se déconnecte lui-même), remet aussi le ticket en cours en file
-   * d'attente s'il y en a un, au lieu de le laisser orphelin sur un poste libéré. */
-  async deconnecterPosteAdmin(posteId) {
-    if (isDemo) return demo.deconnecterPosteAdmin(posteId)
-    const { error } = await supabase.rpc('deconnecter_poste_admin', { p_poste_id: posteId })
+   * d'attente s'il y en a un, au lieu de le laisser orphelin. */
+  async deconnecterAgentAdmin(agentId) {
+    if (isDemo) return demo.deconnecterAgentAdmin(agentId)
+    const { error } = await supabase.rpc('deconnecter_agent_admin', { p_agent_id: agentId })
     if (error) throw new Error(error.message)
   },
 
@@ -414,7 +405,7 @@ export const api = {
     const channel = supabase
       .channel(`org-${organisationId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `organisation_id=eq.${organisationId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'postes', filter: `organisation_id=eq.${organisationId}` }, callback)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agents', filter: `organisation_id=eq.${organisationId}` }, callback)
       .subscribe()
     return () => supabase.removeChannel(channel)
   },

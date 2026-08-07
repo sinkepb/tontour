@@ -1,7 +1,7 @@
 -- ============================================================================
 -- TonTour — schéma Postgres/Supabase
 -- Reprend le modèle de données du prototype (organisations, services, agents,
--- postes, tickets) en l'adaptant à Supabase Auth + RLS pour la production.
+-- tickets) en l'adaptant à Supabase Auth + RLS pour la production.
 --
 -- Écart documenté vs. le prototype : `agents.mot_de_passe_hash` est remplacé
 -- par Supabase Auth (auth.users). `agents.id` référence désormais
@@ -33,7 +33,7 @@ create table organisations (
   couleur_secondaire  text not null default '#818cf8',
   logo_url            text,
   adresse             text check (adresse is null or char_length(adresse) <= 300),
-  alerte_delai_min    int not null default 15, -- délai avant alerte "service sans poste"
+  alerte_delai_min    int not null default 15, -- délai avant alerte "service sans agent connecté"
   delai_absence_min   int not null default 5, -- délai après appel avant de pouvoir marquer le client absent
   enseigne_id         uuid references enseignes(id) on delete set null,
   cree_le             timestamptz not null default now()
@@ -67,34 +67,33 @@ create table promotions (
   cree_le          timestamptz not null default now()
 );
 
--- Un agent = un utilisateur Supabase Auth. Cette table porte le profil métier.
+-- Un agent = un utilisateur Supabase Auth. Cette table porte le profil métier ET
+-- l'état de connexion en direct (connecte/en_pause/ticket_en_cours_id) : pas de
+-- notion de poste/guichet physique séparée — dans une boutique télécom, les
+-- vendeurs sont mobiles, chaque agent est son unique "poste" de travail.
 create table agents (
   id               uuid primary key references auth.users(id) on delete cascade,
   organisation_id  uuid not null references organisations(id) on delete cascade,
   nom              text not null check (char_length(nom) between 1 and 200),
   email            text not null check (char_length(email) <= 255),
   role             text not null check (role in ('admin', 'vendeur')) default 'vendeur',
-  statut           text not null check (statut in ('actif', 'pause', 'deconnecte')) default 'deconnecte',
   -- Services que cet agent est habilité à servir, attribués par l'admin (back-office
-  -- → Postes & agents) — le vendeur ne les choisit plus lui-même à la connexion.
-  -- Copiés sur postes.service_ids au moment de connecter_poste_auto().
+  -- → Agents) — le vendeur ne les choisit plus lui-même.
   service_ids      jsonb not null default '[]',
+  -- État de connexion, modifié uniquement via les RPC activer_agent/basculer_pause/
+  -- deconnecter_agent/deconnecter_agent_admin (SECURITY DEFINER) — jamais en écriture
+  -- directe cliente, pour ne pas avoir à ouvrir de policy RLS self-write qui laisserait
+  -- par construction n'importe quel agent modifier n'importe quelle colonne de sa
+  -- propre ligne (Postgres ne permet pas de restreindre les colonnes par policy, sauf
+  -- via des GRANT distincts par rôle — inapplicable ici puisqu'admin et vendeur
+  -- partagent le même rôle Postgres `authenticated`).
+  connecte           boolean not null default false,
+  en_pause           boolean not null default false,
+  ticket_en_cours_id uuid,
   -- Si renseigné, cet agent voit en plus la vue consolidée en lecture seule de toutes
   -- les organisations de cette enseigne (indépendant de son organisation_id normale).
   enseigne_id      uuid references enseignes(id) on delete set null,
   cree_le          timestamptz not null default now()
-);
-
-create table postes (
-  id                 uuid primary key default gen_random_uuid(),
-  organisation_id    uuid not null references organisations(id) on delete cascade,
-  nom                text not null,
-  agent_id           uuid references agents(id) on delete set null,
-  service_ids        jsonb not null default '[]', -- array d'ids de services servis actuellement
-  ticket_en_cours_id uuid,
-  connecte           boolean not null default false,
-  en_pause           boolean not null default false,
-  cree_le            timestamptz not null default now()
 );
 
 create table tickets (
@@ -118,11 +117,10 @@ create table tickets (
   prioritaire      boolean not null default false,
   commentaire      text check (commentaire is null or char_length(commentaire) <= 1000), -- avis client, laissé avec la note
   client_token     uuid not null default gen_random_uuid(), -- secret remis au client, sert de "mot de passe" pour suivre son ticket
-  poste_id         uuid references postes(id) on delete set null,
-  -- Copié depuis postes.agent_id au moment de l'appel (appeler_prochain) : postes.agent_id
-  -- change au fil de la journée (déconnexions/reconnexions), donc s'y référer après coup pour
-  -- attribuer une note donnerait le mérite au mauvais vendeur. tickets.agent_id fige qui a
-  -- réellement servi ce ticket, pour les moyennes par vendeur (notes_moyennes_vendeur).
+  -- Assigné au moment de l'appel (appeler_prochain), figé ensuite : agents.ticket_en_cours_id
+  -- peut être libéré/réassigné plus tard, donc s'y référer après coup pour attribuer une
+  -- note donnerait le mérite au mauvais vendeur. tickets.agent_id fige qui a réellement
+  -- servi ce ticket, pour les moyennes par vendeur (notes_moyennes_vendeur).
   agent_id         uuid references agents(id) on delete set null,
   cree_le          timestamptz not null default now(),
   appele_le        timestamptz,
@@ -130,8 +128,8 @@ create table tickets (
   note             int check (note between 1 and 5) -- notation client, laissée juste après le traitement
 );
 
-alter table postes
-  add constraint fk_poste_ticket_en_cours foreign key (ticket_en_cours_id) references tickets(id) on delete set null;
+alter table agents
+  add constraint fk_agent_ticket_en_cours foreign key (ticket_en_cours_id) references tickets(id) on delete set null;
 
 -- Trace l'offre choisie à l'inscription self-service (onboarding) et l'identifiant
 -- Stripe correspondant. En mode démo (pas de clé Stripe configurée), stripe_customer_id
@@ -212,7 +210,7 @@ begin
   -- Verrou consultatif borné à la transaction courante (organisation + service + jour) :
   -- sans lui, deux creer_ticket() concurrents pour le même service peuvent tous les deux
   -- lire le même count(*) avant que l'un des deux ne valide, et produire deux tickets avec
-  -- le même code (déjà vu : appeler_prochain/connecter_poste_auto ont le même besoin de
+  -- le même code (déjà vu : appeler_prochain/activer_agent ont le même besoin de
   -- sérialisation, traité là-bas par FOR UPDATE SKIP LOCKED). Le second appelant attend que
   -- le premier valide (ou annule) avant de compter à son tour ; le verrou est libéré
   -- automatiquement à la fin de la transaction de creer_ticket().
@@ -248,7 +246,7 @@ create or replace function creer_ticket(
   p_canal text default 'mobile',
   p_prioritaire boolean default false
 )
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, agent_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -284,7 +282,7 @@ $$;
 -- Note : "position" est un mot réservé PostgreSQL (syntaxe POSITION(x IN y)) —
 -- doit être entre guillemets doubles dans la déclaration RETURNS TABLE.
 create or replace function ticket_status(p_ticket_id uuid, p_client_token uuid)
-returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, poste_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
+returns table (id uuid, code text, client_token uuid, statut text, "position" int, attente_estimee_min int, agent_nom text, service_nom text, documents_requis jsonb, note int, appele_le timestamptz, prioritaire boolean)
 language plpgsql security definer set search_path = public as $$
 declare
   v_ticket tickets;
@@ -315,7 +313,9 @@ begin
        where t.service_id = v_ticket.service_id and t.statut = 'en_attente'
          and (t.prioritaire and not v_ticket.prioritaire or t.prioritaire = v_ticket.prioritaire and t.cree_le < v_ticket.cree_le))
       * coalesce(v_temps_moyen, 5)) as attente_estimee_min,
-    (select p.nom from postes p where p.id = v_ticket.poste_id) as poste_nom,
+    -- Prénom seul (pas le nom complet) : affiché au client final, dans une boutique où
+    -- les vendeurs sont mobiles (pas de guichet fixe à désigner).
+    (select split_part(a.nom, ' ', 1) from agents a where a.id = v_ticket.agent_id) as agent_nom,
     (select s.nom from services s where s.id = v_ticket.service_id) as service_nom,
     (select s.documents_requis from services s where s.id = v_ticket.service_id) as documents_requis,
     v_ticket.note,
@@ -365,9 +365,9 @@ $$;
 -- cours, pour que l'inscription fonctionne même si la confirmation email est
 -- activée sur le projet (auth.uid() ne résout alors qu'après confirmation,
 -- alors que le compte auth.users, lui, existe déjà immédiatement).
--- Provisionne en une transaction : organisation + agent admin + 1er poste +
--- services par défaut + abonnement (démo Stripe pour l'instant : voir
--- commentaire sur la table abonnements).
+-- Provisionne en une transaction : organisation + agent admin + services par
+-- défaut + abonnement (démo Stripe pour l'instant : voir commentaire sur la
+-- table abonnements).
 create or replace function inscrire_organisation(
   p_agent_id uuid,
   p_nom text,
@@ -404,10 +404,8 @@ begin
   )
   returning id into v_org_id;
 
-  insert into agents (id, organisation_id, nom, email, role, statut)
-  values (p_agent_id, v_org_id, p_agent_nom, p_email, 'admin', 'actif');
-
-  insert into postes (organisation_id, nom) values (v_org_id, 'Poste 1');
+  insert into agents (id, organisation_id, nom, email, role)
+  values (p_agent_id, v_org_id, p_agent_nom, p_email, 'admin');
 
   -- Services par défaut selon le type, pour que le compte soit utilisable
   -- immédiatement (l'admin pourra les modifier depuis le back-office).
@@ -427,71 +425,85 @@ begin
 end;
 $$;
 
--- ─── RPC : connexion automatique à un poste libre (agent) ─────────────────
--- Le vendeur ne choisit plus son poste ni ses services à la connexion : le premier
--- poste libre lui est assigné automatiquement, avec les services que l'admin lui a
--- attribués (agents.service_ids). `FOR UPDATE SKIP LOCKED` empêche que deux vendeurs
--- se voient assigner le même poste en cas de connexions simultanées (même mécanisme
--- que appeler_prochain pour les tickets, voir plus bas).
-create or replace function connecter_poste_auto()
-returns postes
+-- ─── RPC : activer l'agent connecté (dashboard vendeur) ───────────────────
+-- Remplace connecter_poste_auto() : plus de pool de postes à s'attribuer, l'agent
+-- est son unique unité de travail. Simple bascule d'état sur sa propre ligne.
+create or replace function activer_agent()
+returns agents
 language plpgsql security definer set search_path = public as $$
 declare
   v_agent agents;
-  v_poste postes;
 begin
-  select * into v_agent from agents where id = auth.uid();
+  update agents set connecte = true, en_pause = false where id = auth.uid()
+  returning * into v_agent;
+  if not found then
+    raise exception 'Agent introuvable';
+  end if;
+  return v_agent;
+end;
+$$;
+
+-- ─── RPC : bascule pause/reprise (dashboard vendeur) ──────────────────────
+create or replace function basculer_pause()
+returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_en_pause boolean;
+begin
+  update agents set en_pause = not en_pause where id = auth.uid()
+  returning en_pause into v_en_pause;
+  if not found then
+    raise exception 'Agent introuvable';
+  end if;
+  return v_en_pause;
+end;
+$$;
+
+-- ─── RPC : déconnexion (le vendeur se déconnecte lui-même) ────────────────
+-- Contrairement à l'ancien modèle poste (interchangeable, un poste libéré profite au
+-- prochain vendeur qui se connecte), un agent est une identité fixe : s'il se
+-- déconnecte avec un ticket en cours, ce ticket doit être remis en file d'attente
+-- plutôt que de bloquer définitivement son prochain login sur "ticket déjà en cours".
+create or replace function deconnecter_agent()
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_agent agents;
+begin
+  select * into v_agent from agents where id = auth.uid() for update;
   if not found then
     raise exception 'Agent introuvable';
   end if;
 
-  -- Déjà connecté (ex. rechargement de page) : on réutilise le même poste plutôt que
-  -- d'en assigner un nouveau.
-  select * into v_poste from postes
-  where organisation_id = v_agent.organisation_id and agent_id = v_agent.id and connecte = true
-  limit 1;
-  if found then
-    return v_poste;
+  if v_agent.ticket_en_cours_id is not null then
+    update tickets set statut = 'en_attente', agent_id = null, appele_le = null
+    where id = v_agent.ticket_en_cours_id;
   end if;
 
-  select * into v_poste from postes
-  where organisation_id = v_agent.organisation_id and connecte = false
-  order by nom
-  for update skip locked
-  limit 1;
-
-  if not found then
-    raise exception 'Aucun poste disponible actuellement';
-  end if;
-
-  update postes set agent_id = v_agent.id, service_ids = v_agent.service_ids, connecte = true, en_pause = false
-  where id = v_poste.id
-  returning * into v_poste;
-
-  return v_poste;
+  update agents set connecte = false, en_pause = false, ticket_en_cours_id = null where id = auth.uid();
 end;
 $$;
 
--- ─── RPC : appeler le prochain ticket (poste vendeur) ─────────────────────
--- Verrouillage transactionnel : FOR UPDATE sur le poste + FOR UPDATE SKIP LOCKED
--- sur la sélection du ticket, pour empêcher qu'un même ticket soit assigné
--- à deux postes en cas d'appels concurrents (critère d'acceptation §10).
-create or replace function appeler_prochain(p_poste_id uuid)
+-- ─── RPC : appeler le prochain ticket (dashboard vendeur) ─────────────────
+-- Verrouillage transactionnel : FOR UPDATE sur la ligne agent + FOR UPDATE SKIP LOCKED
+-- sur la sélection du ticket, pour empêcher qu'un même ticket soit assigné à deux
+-- agents en cas d'appels concurrents (critère d'acceptation §10).
+drop function if exists appeler_prochain(uuid);
+create or replace function appeler_prochain()
 returns tickets
 language plpgsql security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
   v_ticket tickets;
 begin
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id()
-    for update;
+  select * into v_agent from agents where id = auth.uid() for update;
 
   if not found then
-    raise exception 'Poste introuvable';
+    raise exception 'Agent introuvable';
   end if;
 
-  if v_poste.ticket_en_cours_id is not null then
-    raise exception 'Un ticket est déjà en cours sur ce poste';
+  if v_agent.ticket_en_cours_id is not null then
+    raise exception 'Un ticket est déjà en cours';
   end if;
 
   -- Priorité spéciale (PMR, urgence) d'abord, sans attendre le poids du service —
@@ -499,38 +511,37 @@ begin
   select t.* into v_ticket
   from tickets t
   join services s on s.id = t.service_id
-  where t.organisation_id = v_poste.organisation_id
+  where t.organisation_id = v_agent.organisation_id
     and t.statut = 'en_attente'
-    and t.service_id in (select jsonb_array_elements_text(v_poste.service_ids)::uuid)
+    and t.service_id in (select jsonb_array_elements_text(v_agent.service_ids)::uuid)
   order by t.prioritaire desc, s.poids desc, t.cree_le asc
   for update of t skip locked
   limit 1;
 
   if not found then
-    raise exception 'Aucun ticket en attente pour les services de ce poste';
+    raise exception 'Aucun ticket en attente pour vos services';
   end if;
 
-  update tickets set statut = 'en_cours', poste_id = p_poste_id, agent_id = v_poste.agent_id, appele_le = now()
+  update tickets set statut = 'en_cours', agent_id = v_agent.id, appele_le = now()
   where id = v_ticket.id
   returning * into v_ticket;
 
-  update postes set ticket_en_cours_id = v_ticket.id where id = p_poste_id;
+  update agents set ticket_en_cours_id = v_ticket.id where id = v_agent.id;
 
   return v_ticket;
 end;
 $$;
 
 -- ─── RPC : aperçu du prochain ticket, sans l'assigner (affichage agent) ───
-create or replace function apercu_prochain(p_poste_id uuid)
+drop function if exists apercu_prochain(uuid);
+create or replace function apercu_prochain()
 returns table (id uuid, code text, service_id uuid, motif text, cree_le timestamptz, prioritaire boolean)
 language plpgsql stable security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
 begin
-  -- Alias "p" obligatoire : cette fonction déclare RETURNS TABLE(id ...), donc "id" seul
-  -- serait ambigu entre la colonne postes.id et la variable de sortie "id" de la fonction.
-  select * into v_poste from postes p where p.id = p_poste_id and p.organisation_id = agent_organisation_id();
-  if not found or v_poste.ticket_en_cours_id is not null then
+  select * into v_agent from agents a where a.id = auth.uid();
+  if not found or v_agent.ticket_en_cours_id is not null then
     return;
   end if;
 
@@ -538,111 +549,115 @@ begin
   select t.id, t.code, t.service_id, t.motif, t.cree_le, t.prioritaire
   from tickets t
   join services s on s.id = t.service_id
-  where t.organisation_id = v_poste.organisation_id
+  where t.organisation_id = v_agent.organisation_id
     and t.statut = 'en_attente'
-    and t.service_id in (select jsonb_array_elements_text(v_poste.service_ids)::uuid)
+    and t.service_id in (select jsonb_array_elements_text(v_agent.service_ids)::uuid)
   order by t.prioritaire desc, s.poids desc, t.cree_le asc
   limit 1;
 end;
 $$;
 
--- ─── RPC : terminer le traitement en cours (poste vendeur) ────────────────
-create or replace function terminer_traitement(p_poste_id uuid)
+-- ─── RPC : terminer le traitement en cours (dashboard vendeur) ────────────
+drop function if exists terminer_traitement(uuid);
+create or replace function terminer_traitement()
 returns void
 language plpgsql security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
 begin
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id() for update;
-  if not found or v_poste.ticket_en_cours_id is null then
-    raise exception 'Aucun ticket en cours sur ce poste';
+  select * into v_agent from agents where id = auth.uid() for update;
+  if not found or v_agent.ticket_en_cours_id is null then
+    raise exception 'Aucun ticket en cours';
   end if;
 
-  update tickets set statut = 'termine', termine_le = now() where id = v_poste.ticket_en_cours_id;
-  update postes set ticket_en_cours_id = null where id = p_poste_id;
+  update tickets set statut = 'termine', termine_le = now() where id = v_agent.ticket_en_cours_id;
+  update agents set ticket_en_cours_id = null where id = v_agent.id;
 end;
 $$;
 
--- ─── RPC : relancer la notification du client en cours (poste vendeur) ────
+-- ─── RPC : relancer la notification du client en cours (dashboard vendeur) ─
 -- Ne réassigne rien : touche seulement appele_le, pour permettre à l'agent de
 -- rappeler un client qui n'a pas répondu, sans perdre le ticket en cours.
-create or replace function rappeler_client(p_poste_id uuid)
+drop function if exists rappeler_client(uuid);
+create or replace function rappeler_client()
 returns void
 language plpgsql security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
 begin
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id();
-  if not found or v_poste.ticket_en_cours_id is null then
-    raise exception 'Aucun ticket en cours sur ce poste';
+  select * into v_agent from agents where id = auth.uid();
+  if not found or v_agent.ticket_en_cours_id is null then
+    raise exception 'Aucun ticket en cours';
   end if;
 
-  update tickets set appele_le = now() where id = v_poste.ticket_en_cours_id;
+  update tickets set appele_le = now() where id = v_agent.ticket_en_cours_id;
 end;
 $$;
 
--- ─── RPC : marquer le client en cours comme absent (poste vendeur) ────────
+-- ─── RPC : marquer le client en cours comme absent (dashboard vendeur) ────
 -- Distinct de terminer_traitement : le client n'a pas été servi, le ticket passe
 -- 'absent' (pas 'termine') pour ne pas fausser les statistiques/moyennes de notes.
 -- Le délai de grâce (organisations.delai_absence_min) est vérifié côté serveur, pas
 -- seulement dans l'UI (AgentPage n'affiche/active le bouton qu'après ce délai, mais
 -- rien n'empêche un appel direct à la RPC avant).
-create or replace function marquer_absent(p_poste_id uuid)
+drop function if exists marquer_absent(uuid);
+create or replace function marquer_absent()
 returns void
 language plpgsql security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
   v_ticket tickets;
   v_delai int;
 begin
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id() for update;
-  if not found or v_poste.ticket_en_cours_id is null then
-    raise exception 'Aucun ticket en cours sur ce poste';
+  select * into v_agent from agents where id = auth.uid() for update;
+  if not found or v_agent.ticket_en_cours_id is null then
+    raise exception 'Aucun ticket en cours';
   end if;
 
-  select * into v_ticket from tickets where id = v_poste.ticket_en_cours_id;
-  select delai_absence_min into v_delai from organisations where id = v_poste.organisation_id;
+  select * into v_ticket from tickets where id = v_agent.ticket_en_cours_id;
+  select delai_absence_min into v_delai from organisations where id = v_agent.organisation_id;
 
   if v_ticket.appele_le is null or now() < v_ticket.appele_le + make_interval(mins => coalesce(v_delai, 5)) then
     raise exception 'Délai de grâce non écoulé avant de marquer ce client absent';
   end if;
 
-  update tickets set statut = 'absent', termine_le = now() where id = v_poste.ticket_en_cours_id;
-  update postes set ticket_en_cours_id = null where id = p_poste_id;
+  update tickets set statut = 'absent', termine_le = now() where id = v_agent.ticket_en_cours_id;
+  update agents set ticket_en_cours_id = null where id = v_agent.id;
 end;
 $$;
 
--- ─── RPC : déconnexion forcée d'un poste par l'admin (back-office) ────────
--- Contrairement à AgentPage (le vendeur se déconnecte lui-même), l'admin peut avoir
--- besoin de libérer un poste resté "actif" (vendeur parti sans se déconnecter...).
--- Si un ticket est en cours sur ce poste, il est remis en file d'attente ('en_attente',
--- poste_id/agent_id/appele_le réinitialisés) plutôt que laissé orphelin — un autre
--- vendeur pourra le reprendre. cree_le n'est pas touché : le client ne perd pas son
--- ancienneté dans la file.
-create or replace function deconnecter_poste_admin(p_poste_id uuid)
+-- ─── RPC : déconnexion forcée d'un agent par l'admin (back-office) ────────
+-- Contrairement à deconnecter_agent (le vendeur se déconnecte lui-même), l'admin peut
+-- avoir besoin de libérer un agent resté "actif" à tort (parti sans se déconnecter...).
+-- Si un ticket est en cours, il est remis en file d'attente ('en_attente', agent_id/
+-- appele_le réinitialisés) plutôt que laissé orphelin — un autre vendeur pourra le
+-- reprendre. cree_le n'est pas touché : le client ne perd pas son ancienneté dans la file.
+drop function if exists deconnecter_poste_admin(uuid);
+create or replace function deconnecter_agent_admin(p_agent_id uuid)
 returns void
 language plpgsql security definer set search_path = public as $$
 declare
-  v_poste postes;
+  v_agent agents;
 begin
   if agent_role() <> 'admin' then
     raise exception 'Réservé aux administrateurs';
   end if;
 
-  select * into v_poste from postes where id = p_poste_id and organisation_id = agent_organisation_id() for update;
+  select * into v_agent from agents where id = p_agent_id and organisation_id = agent_organisation_id() for update;
   if not found then
-    raise exception 'Poste introuvable';
+    raise exception 'Agent introuvable';
   end if;
 
-  if v_poste.ticket_en_cours_id is not null then
-    update tickets set statut = 'en_attente', poste_id = null, agent_id = null, appele_le = null
-    where id = v_poste.ticket_en_cours_id;
+  if v_agent.ticket_en_cours_id is not null then
+    update tickets set statut = 'en_attente', agent_id = null, appele_le = null
+    where id = v_agent.ticket_en_cours_id;
   end if;
 
-  update postes set connecte = false, en_pause = false, agent_id = null, service_ids = '[]'::jsonb, ticket_en_cours_id = null
-  where id = p_poste_id;
+  update agents set connecte = false, en_pause = false, ticket_en_cours_id = null where id = p_agent_id;
 end;
 $$;
+
+drop function if exists connecter_poste_auto();
 
 -- ─── RPC : écran de salle (lecture publique, sans données sensibles) ──────
 create or replace function salle_affichage(p_organisation_id uuid)
@@ -652,8 +667,10 @@ returns table (
 )
 language sql stable security definer set search_path = public as $$
   select
-    (select coalesce(jsonb_agg(jsonb_build_object('code', t.code, 'poste', p.nom) order by t.appele_le desc), '[]')
-       from tickets t join postes p on p.id = t.poste_id
+    -- Prénom seul : boutiques mobiles, pas de guichet fixe à annoncer (voir agent_nom
+    -- dans ticket_status/creer_ticket, même rationale).
+    (select coalesce(jsonb_agg(jsonb_build_object('code', t.code, 'agent', split_part(a.nom, ' ', 1)) order by t.appele_le desc), '[]')
+       from tickets t join agents a on a.id = t.agent_id
        where t.organisation_id = p_organisation_id and t.statut = 'en_cours'),
     (select coalesce(jsonb_agg(jsonb_build_object('code', t.code) order by t.cree_le asc), '[]')
        from tickets t
@@ -662,14 +679,15 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ─── RPC : statistiques du jour (back-office) ─────────────────────────────
+drop function if exists stats_jour(uuid);
 create or replace function stats_jour(p_organisation_id uuid)
-returns table (tickets_traites int, tickets_total int, attente_moyenne_min numeric, postes_connectes int)
+returns table (tickets_traites int, tickets_total int, attente_moyenne_min numeric, agents_connectes int)
 language sql stable security definer set search_path = public as $$
   select
     count(*) filter (where statut = 'termine')::int,
     count(*)::int,
     coalesce(round(avg(extract(epoch from (appele_le - cree_le)) / 60) filter (where appele_le is not null), 1), 0),
-    (select count(*)::int from postes where organisation_id = p_organisation_id and connecte)
+    (select count(*)::int from agents where organisation_id = p_organisation_id and connecte)
   from tickets
   where organisation_id = p_organisation_id
     and p_organisation_id = agent_organisation_id()
@@ -711,9 +729,10 @@ $$;
 
 -- ─── RPC : vue consolidée multi-boutiques (enseignes, back-office) ────────
 -- N'importe quel agent peut appeler cette RPC (SECURITY DEFINER, contourne la RLS
--- normale sur tickets/postes) — la protection est le `and o.enseigne_id =
+-- normale sur tickets/agents) — la protection est le `and o.enseigne_id =
 -- agent_enseigne_id()` : si l'appelant n'a pas cette enseigne_id, la condition est
 -- fausse pour toutes les lignes et la fonction renvoie un jeu de résultats vide.
+drop function if exists stats_enseigne(uuid);
 create or replace function stats_enseigne(p_enseigne_id uuid)
 returns table (
   organisation_id uuid,
@@ -721,7 +740,7 @@ returns table (
   tickets_traites int,
   tickets_total int,
   attente_moyenne_min numeric,
-  postes_connectes int
+  agents_connectes int
 )
 language sql stable security definer set search_path = public as $$
   select
@@ -737,13 +756,13 @@ language sql stable security definer set search_path = public as $$
        from tickets t
        where t.organisation_id = o.id
          and t.cree_le >= date_trunc('day', now()) and t.cree_le < date_trunc('day', now()) + interval '1 day'),
-    (select count(*)::int from postes p where p.organisation_id = o.id and p.connecte)
+    (select count(*)::int from agents a where a.organisation_id = o.id and a.connecte)
   from organisations o
   where o.enseigne_id = p_enseigne_id and p_enseigne_id = agent_enseigne_id()
   order by o.nom;
 $$;
 
--- ─── RPC : alerte "service sans poste connecté" (back-office) ─────────────
+-- ─── RPC : alerte "service sans agent connecté" (back-office) ─────────────
 create or replace function services_en_alerte(p_organisation_id uuid)
 returns table (service_id uuid, service_nom text, tickets_en_attente int, plus_ancien_min int)
 language sql stable security definer set search_path = public as $$
@@ -758,10 +777,10 @@ language sql stable security definer set search_path = public as $$
   where s.organisation_id = p_organisation_id
     and p_organisation_id = agent_organisation_id()
     and not exists (
-      select 1 from postes p
-      where p.organisation_id = s.organisation_id
-        and p.connecte and not p.en_pause
-        and p.service_ids @> to_jsonb(s.id::text)
+      select 1 from agents a
+      where a.organisation_id = s.organisation_id
+        and a.connecte and not a.en_pause
+        and a.service_ids @> to_jsonb(s.id::text)
     )
   group by s.id, s.nom, o.alerte_delai_min
   having coalesce(extract(epoch from (now() - min(t.cree_le))) / 60, 0) >= o.alerte_delai_min;
@@ -781,9 +800,10 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ─── RPC : notes moyennes par vendeur (back-office) ───────────────────────
--- Se base sur tickets.agent_id (figé au moment de l'appel), pas sur
--- postes.agent_id (qui change au fil de la journée) : voir commentaire sur
--- la colonne dans la définition de la table tickets plus haut.
+-- Se base sur tickets.agent_id (figé au moment de l'appel), pas sur l'agent
+-- actuellement connecté sur le ticket (qui peut changer après une déconnexion forcée
+-- suivie d'une reprise par un autre vendeur) : voir commentaire sur la colonne dans
+-- la définition de la table tickets plus haut.
 create or replace function notes_moyennes_vendeur(p_organisation_id uuid)
 returns table (agent_id uuid, agent_nom text, note_moyenne numeric, nb_avis int)
 language sql stable security definer set search_path = public as $$
@@ -804,7 +824,6 @@ alter table organisations enable row level security;
 alter table services enable row level security;
 alter table promotions enable row level security;
 alter table agents enable row level security;
-alter table postes enable row level security;
 alter table tickets enable row level security;
 
 -- organisations : lecture publique limitée aux infos de branding (nécessaire
@@ -864,16 +883,15 @@ create policy promotions_admin_delete on promotions for delete using (organisati
 grant select on promotions to anon;
 grant insert, update, delete on promotions to authenticated;
 
--- agents : un agent ne voit que les agents de sa propre organisation.
+-- agents : un agent ne voit que les agents de sa propre organisation. L'état de
+-- connexion (connecte/en_pause/ticket_en_cours_id) n'est PAS modifiable via une policy
+-- self-write : voir le commentaire sur ces colonnes dans la définition de la table —
+-- ça passe exclusivement par les RPC SECURITY DEFINER activer_agent/basculer_pause/
+-- deconnecter_agent/deconnecter_agent_admin, seul moyen de restreindre précisément les
+-- colonnes touchées quand admin et vendeur partagent le même rôle Postgres.
 create policy agents_self_org_read on agents for select using (organisation_id = agent_organisation_id());
 create policy agents_admin_write on agents for update using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 create policy agents_admin_insert on agents for insert with check (organisation_id = agent_organisation_id() and agent_role() = 'admin');
-
--- postes : lecture/écriture réservées aux agents de l'organisation.
-create policy postes_org_read on postes for select using (organisation_id = agent_organisation_id());
-create policy postes_org_write on postes for update using (organisation_id = agent_organisation_id());
-create policy postes_admin_insert on postes for insert with check (organisation_id = agent_organisation_id() and agent_role() = 'admin');
-create policy postes_admin_delete on postes for delete using (organisation_id = agent_organisation_id() and agent_role() = 'admin');
 
 -- tickets : aucun accès direct table pour anon/authenticated — tout passe par
 -- les fonctions SECURITY DEFINER ci-dessus (creer_ticket, ticket_status,
@@ -893,12 +911,12 @@ create policy abonnements_admin_read on abonnements for select
 -- ============================================================================
 -- Realtime : sans ceci, les abonnements postgres_changes (src/lib/api.js
 -- subscribeToOrg) ne se déclenchent JAMAIS, silencieusement — ni la
--- notification client ("c'est votre tour"), ni le rafraîchissement du poste
+-- notification client ("c'est votre tour"), ni le rafraîchissement du dashboard
 -- agent quand un ticket arrive. Une table créée par le SQL Editor n'est pas
 -- ajoutée automatiquement à la publication realtime de Supabase.
 -- ============================================================================
 
-alter publication supabase_realtime add table tickets, postes;
+alter publication supabase_realtime add table tickets, agents;
 
 -- ============================================================================
 -- Storage : upload du logo par organisation (back-office § Identité visuelle)
@@ -934,11 +952,6 @@ create policy "logos_admin_delete" on storage.objects for delete
 insert into organisations (id, nom, type, couleur_principale, couleur_secondaire, adresse) values
   ('00000000-0000-0000-0000-000000000001', 'Mobile Store Bastille', 'boutique', '#ea580c', '#fb923c', '12 rue de la Roquette, 75011 Paris'),
   ('00000000-0000-0000-0000-000000000002', 'Mairie de Villeneuve', 'mairie', '#0f766e', '#5eead4', '1 place de la Mairie, 33140 Villeneuve');
-
-insert into postes (organisation_id, nom) values
-  ('00000000-0000-0000-0000-000000000001', 'Poste 1'),
-  ('00000000-0000-0000-0000-000000000001', 'Poste 2'),
-  ('00000000-0000-0000-0000-000000000002', 'Guichet 1');
 
 insert into services (organisation_id, prefixe_ticket, nom, temps_moyen_min, poids, documents_requis, motifs_predefinis) values
   ('00000000-0000-0000-0000-000000000001', 'V', 'Ventes', 6, 1, '["Pièce d''identité"]', '["Nouveau forfait", "Changement de forfait", "Nouvel appareil"]'),

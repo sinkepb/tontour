@@ -7,7 +7,7 @@ import StatsTab from './backoffice/StatsTab.jsx'
 import RatingsTab from './backoffice/RatingsTab.jsx'
 import SearchTab from './backoffice/SearchTab.jsx'
 import ServicesTab from './backoffice/ServicesTab.jsx'
-import PostesAgentsTab from './backoffice/PostesAgentsTab.jsx'
+import AgentsTab from './backoffice/AgentsTab.jsx'
 import PromotionsTab from './backoffice/PromotionsTab.jsx'
 import BrandingTab from './backoffice/BrandingTab.jsx'
 import QrCodeTab from './backoffice/QrCodeTab.jsx'
@@ -19,7 +19,7 @@ const TABS = [
   ['Avis clients', '⭐'],
   ['Recherche', '🔍'],
   ['Services', '🛎️'],
-  ['Postes & agents', '🖥️'],
+  ['Agents', '🧑‍💼'],
   ['Storie', '📣'],
   ['Enseigne', '🏬'],
   ['Image de marque', '🎨'],
@@ -34,7 +34,6 @@ export default function BackofficePage() {
   const [tab, setTab] = useState(TABS[0][0])
   const [org, setOrg] = useState(null)
   const [services, setServices] = useState([])
-  const [postes, setPostes] = useState([])
   const [agents, setAgents] = useState([])
   const [stats, setStats] = useState(null)
   const [alertes, setAlertes] = useState([])
@@ -49,10 +48,9 @@ export default function BackofficePage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [o, s, p, ag, st, al, pr, ns, nv, avis, tend, heu, ens] = await Promise.all([
+      const [o, s, ag, st, al, pr, ns, nv, avis, tend, heu, ens] = await Promise.all([
         api.getOrganisationAuth(orgId),
         api.getServices(orgId),
-        api.listPostes(orgId),
         api.listAgents(orgId),
         api.statsJour(orgId),
         api.servicesEnAlerte(orgId),
@@ -66,7 +64,6 @@ export default function BackofficePage() {
       ])
       setOrg(o)
       setServices(s)
-      setPostes(p)
       setAgents(ag)
       setStats(st)
       setAlertes(al)
@@ -136,7 +133,7 @@ export default function BackofficePage() {
 
       {alertes.length > 0 && (
         <div className="alert-box">
-          ⚠️ {alertes.length} service(s) sans poste connecté depuis plus du délai configuré :{' '}
+          ⚠️ {alertes.length} service(s) sans agent connecté depuis plus du délai configuré :{' '}
           {alertes.map((a) => `${a.service_nom} (${a.tickets_en_attente} en attente, ${a.plus_ancien_min} min)`).join(' · ')}
         </div>
       )}
@@ -145,7 +142,7 @@ export default function BackofficePage() {
       {tab === 'Avis clients' && <RatingsTab notesServices={notesServices} notesVendeurs={notesVendeurs} avisRecents={avisRecents} services={services} />}
       {tab === 'Recherche' && <SearchTab orgId={orgId} services={services} agents={agents} />}
       {tab === 'Services' && <ServicesTab orgId={orgId} services={services} onChange={refresh} />}
-      {tab === 'Postes & agents' && <PostesAgentsTab postes={postes} agents={agents} services={services} onChange={refresh} />}
+      {tab === 'Agents' && <AgentsTab agents={agents} services={services} onChange={refresh} />}
       {tab === 'Storie' && <PromotionsTab orgId={orgId} promotions={promotions} onChange={refresh} />}
       {tab === 'Enseigne' && <EnseigneTab org={org} agents={agents} enseignes={enseignes} onChange={refresh} />}
       {tab === 'Image de marque' && <BrandingTab orgId={orgId} org={org} onChange={refresh} />}

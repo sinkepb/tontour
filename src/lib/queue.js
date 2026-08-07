@@ -9,15 +9,15 @@ export function generateTicketCode(prefixeTicket, nombreTicketsServiceAujourdhui
 }
 
 /**
- * Sélectionne le prochain ticket à servir pour un poste, parmi les services
+ * Sélectionne le prochain ticket à servir pour un agent, parmi les services
  * qu'il sert actuellement : priorité spéciale (PMR, urgence) d'abord — sans
  * attendre le poids du service — puis poids de service décroissant, puis FIFO.
  * @param {Array} ticketsEnAttente tickets avec statut 'en_attente'
  * @param {Map<string, number>} poidsParService service_id -> poids
- * @param {string[]} serviceIdsPoste services servis par le poste
+ * @param {string[]} serviceIdsAgent services servis par l'agent
  */
-export function selectNextTicket(ticketsEnAttente, poidsParService, serviceIdsPoste) {
-  const eligibles = ticketsEnAttente.filter((t) => serviceIdsPoste.includes(t.service_id))
+export function selectNextTicket(ticketsEnAttente, poidsParService, serviceIdsAgent) {
+  const eligibles = ticketsEnAttente.filter((t) => serviceIdsAgent.includes(t.service_id))
   if (eligibles.length === 0) return null
 
   return eligibles.sort((a, b) => {

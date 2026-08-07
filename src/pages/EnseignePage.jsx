@@ -51,9 +51,9 @@ export default function EnseignePage() {
     (acc, l) => ({
       tickets_traites: acc.tickets_traites + l.tickets_traites,
       tickets_total: acc.tickets_total + l.tickets_total,
-      postes_connectes: acc.postes_connectes + l.postes_connectes,
+      agents_connectes: acc.agents_connectes + l.agents_connectes,
     }),
-    { tickets_traites: 0, tickets_total: 0, postes_connectes: 0 }
+    { tickets_traites: 0, tickets_total: 0, agents_connectes: 0 }
   )
 
   return (
@@ -69,7 +69,7 @@ export default function EnseignePage() {
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', marginBottom: 18 }}>
           <div className="stat-tile"><div className="value">{totaux.tickets_traites}</div><div className="label">Tickets traités (réseau)</div></div>
           <div className="stat-tile"><div className="value">{totaux.tickets_total}</div><div className="label">Tickets créés (réseau)</div></div>
-          <div className="stat-tile"><div className="value">{totaux.postes_connectes}</div><div className="label">Postes connectés (réseau)</div></div>
+          <div className="stat-tile"><div className="value">{totaux.agents_connectes}</div><div className="label">Vendeurs connectés (réseau)</div></div>
         </div>
       )}
 
@@ -82,7 +82,7 @@ export default function EnseignePage() {
         ) : (
           <table className="data-table">
             <thead>
-              <tr><th>Point de vente</th><th>Traités</th><th>Créés</th><th>Attente moy.</th><th>Postes connectés</th></tr>
+              <tr><th>Point de vente</th><th>Traités</th><th>Créés</th><th>Attente moy.</th><th>Vendeurs connectés</th></tr>
             </thead>
             <tbody>
               {lignes.map((l) => (

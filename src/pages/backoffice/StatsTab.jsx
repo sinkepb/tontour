@@ -4,7 +4,7 @@ const STAT_META = [
   ['tickets_traites', 'Tickets traités aujourd’hui', '✅', '#16a34a'],
   ['tickets_total', 'Tickets créés aujourd’hui', '🎫', '#2563eb'],
   ['attente_moyenne_min', 'Attente moyenne (min)', '⏱️', '#d97706'],
-  ['postes_connectes', 'Postes connectés', '🖥️', '#7c3aed'],
+  ['agents_connectes', 'Vendeurs connectés', '🧑‍💼', '#7c3aed'],
 ]
 
 export default function StatsTab({ stats, tendance, heures }) {
