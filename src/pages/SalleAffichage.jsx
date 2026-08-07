@@ -95,9 +95,9 @@ export default function SalleAffichage() {
         )}
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           {data.appeles.map((t) => (
-            <div className="salle-called" key={t.code + t.poste}>
+            <div className="salle-called" key={t.code + t.agent}>
               <div className="code">{t.code}</div>
-              <div className="poste">→ {t.poste}</div>
+              <div className="agent">→ {t.agent}</div>
             </div>
           ))}
         </div>

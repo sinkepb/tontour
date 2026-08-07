@@ -35,7 +35,7 @@ describe('selectNextTicket — critère §10 : 3 services de poids différents',
     expect(next.id).toBe('t2')
   })
 
-  it('ignore les tickets des services non servis par le poste', () => {
+  it('ignore les tickets des services non servis par l’agent', () => {
     const tickets = [{ id: 't1', service_id: 'sav', cree_le: '2026-08-02T09:00:00.000Z' }]
     expect(selectNextTicket(tickets, poids, ['ventes'])).toBeNull()
   })

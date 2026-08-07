@@ -131,7 +131,7 @@ export default function ClientPage() {
   useEffect(() => {
     if (ticket?.statut !== 'en_cours' && ticket?.statut !== 'termine') return
     if (ticket.statut === 'en_cours') {
-      // C'est le moment critique (se présenter au poste) : alerte longue et
+      // C'est le moment critique (se présenter au vendeur) : alerte longue et
       // insistante plutôt qu'un simple buzz, sur le modèle d'une sonnerie d'appel.
       if ('vibrate' in navigator) navigator.vibrate(RING_VIBRATE_PATTERN)
       playRingtone()
@@ -140,7 +140,7 @@ export default function ClientPage() {
     }
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       if (ticket.statut === 'en_cours') {
-        new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous au ${ticket.poste_nom}` })
+        new Notification('TonTour — c’est votre tour', { body: `Ticket ${ticket.code} — présentez-vous auprès de ${ticket.agent_nom}` })
       } else {
         new Notification('TonTour — traitement terminé', { body: `Ticket ${ticket.code} — merci ! Donnez votre avis en 1 clic.` })
       }
@@ -148,7 +148,7 @@ export default function ClientPage() {
     // ticket.appele_le dans les dépendances : l'agent peut rappeler (sonnette
     // toujours active après le premier appel) sans changer le statut du ticket,
     // ce re-déclenchement garantit une nouvelle alerte à chaque rappel.
-  }, [ticket?.statut, ticket?.code, ticket?.poste_nom, ticket?.appele_le, playRingtone])
+  }, [ticket?.statut, ticket?.code, ticket?.agent_nom, ticket?.appele_le, playRingtone])
 
   async function creerTicket(e) {
     e.preventDefault()
@@ -247,7 +247,7 @@ export default function ClientPage() {
           checkedDocs={checked}
           onToggleDoc={toggleDoc}
           fullscreen
-          alert={enCours ? { title: 'C’est votre tour !', body: `Présentez-vous au ${ticket.poste_nom} avec le ticket ${ticket.code}` } : null}
+          alert={enCours ? { title: 'C’est votre tour !', body: `Présentez-vous auprès de ${ticket.agent_nom} avec le ticket ${ticket.code}` } : null}
           footer={
             enCours ? null : (
               <>

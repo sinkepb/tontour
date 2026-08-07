@@ -7,9 +7,9 @@ import { PageShell, Card, Field, Button } from '../components/ui.jsx'
 
 const STEPS = ['Organisation', 'Offre', 'Compte', 'Paiement']
 
-/** Onboarding self-service depuis la landing page : crée l'organisation, le
- * premier poste, des services par défaut et le compte administrateur en une
- * seule fois, sans intervention manuelle. L'étape de paiement intègre Stripe
+/** Onboarding self-service depuis la landing page : crée l'organisation, des
+ * services par défaut et le compte administrateur en une seule fois, sans
+ * intervention manuelle. L'étape de paiement intègre Stripe
  * en mode démo (voir StripeDemoCheckout ci-dessous) — aucune transaction
  * réelle n'est traitée. */
 export default function OnboardingPage() {
